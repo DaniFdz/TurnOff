@@ -2,7 +2,13 @@ import os
 import sys
 from sys import platform
 import time
+from playsound import playsound
 from flet import app, IconButton, Page, Column, Row, Text, icons
+
+
+def play_sound():
+    if os.path.exists(os.path.join(os.path.dirname(__file__), "notification.mp3")):
+        playsound(os.path.join(os.path.dirname(__file__), "notification.mp3"))
 
 
 class App:
@@ -14,12 +20,30 @@ class App:
             print("This script requires elevated privileges. Relaunching with sudo...")
             # Relaunch the script with sudo
             try:
-                # Use os.execvp to replace the current process with the new process
-                os.execvp("sudo", ["sudo", "python3"] + sys.argv)
+                if sys.argv[0][-3:] == ".py":
+                    os.execv(
+                        "/usr/bin/osascript",
+                        [
+                            "osascript",
+                            "-e",
+                            f'do shell script "python3 {" ".join(sys.argv)}" with administrator privileges',
+                        ],
+                    )
+                else:
+                    os.execv(
+                        "/usr/bin/osascript",
+                        [
+                            "osascript",
+                            "-e",
+                            f'do shell script "{" ".join(sys.argv)}" with administrator privileges',
+                        ],
+                    )
+
             except Exception as e:
                 print(f"Failed to relaunch script with sudo: {e}")
                 sys.exit(1)
 
+        play_sound()
         app(target=self.main, port=8080)
 
     def main(self, page: Page):
@@ -44,6 +68,7 @@ class App:
 
         def shutdown_alert():
             if not self.turned_off:
+                play_sound()
                 page.add(
                     Text(
                         value="The computer will turn off in 1 minute",
@@ -99,7 +124,7 @@ class App:
             )
             if t <= 0:
                 shutdown_alert()
-            if t <= -1:
+            if t < -60:
                 shutdown()
 
             page.update()

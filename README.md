@@ -31,7 +31,7 @@ Application for scheduling the shutdown of a windows pc
  ```ps1
 pip install -r requirements.txt
 cd src
-pyinstaller .\src\TurnOff.py --noconsole --noconfirm --onefile --icon .\src\icon.ico
+pyinstaller .\src\TurnOff.py --noconsole --noconfirm --onefile --icon .\src\icon.ico 
 ```
 
 ## Usage 🌝
