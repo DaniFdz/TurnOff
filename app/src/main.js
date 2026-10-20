@@ -3,7 +3,7 @@
 import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, shell } from 'electron';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readdirSync, existsSync } from 'node:fs';
+import { existsSync, appendFileSync, mkdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 
 import { NightSession } from './core/session.js';
@@ -22,6 +22,18 @@ const PRELOAD = join(ROOT, 'preload.cjs');
 
 // Electron needs the app name before `app.whenReady` to use the right userData dir.
 app.setName('TurnOff');
+
+// A tray app that dies silently is unrecoverable; keep a small boot log next to
+// the settings so a failed start can be explained after the fact.
+function bootLog(message) {
+  try {
+    const file = join(app.getPath('userData'), 'boot.log');
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, `${new Date().toISOString()} ${message}\n`);
+  } catch {
+    // Logging must never be the reason the app fails to start.
+  }
+}
 if (process.platform === 'win32') app.setAppUserModelId('com.danifdz.turnoff');
 
 let win = null;
@@ -193,11 +205,22 @@ function registerIpc() {
 // ---------------------------------------------------------------- boot
 
 app.whenReady().then(async () => {
+  bootLog('boot, userData=' + app.getPath('userData'));
   config = await loadConfig();
+  // Persist on first run: a missing settings.json means the user never sees
+  // the defaults the app is actually running with.
+  config = await saveConfig(config);
+  bootLog('config loaded');
   initSession();
   registerIpc();
   createWindow();
-  createTray();
+  bootLog('window created');
+  try {
+    createTray();
+    bootLog('tray created');
+  } catch (err) {
+    bootLog('tray failed: ' + (err?.stack ?? err));
+  }
 
   if (process.platform === 'linux') app.dock?.hide?.();
 });
