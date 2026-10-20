@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TurnOff — UI mockup v2</title>
+<style>
+  :root{
+    --bg:#0b0c10;
+    --panel:#14161c;
+    --panel-2:#1a1d25;
+    --line:#242833;
+    --text:#e8eaf0;
+    --muted:#8b91a1;
+    --dim:#5b6172;
+    --accent:#f0a35e;
+    --accent-soft:rgba(240,163,94,.12);
+    --good:#6fd08b;
+    --warn:#f0a35e;
+    --bad:#e8697a;
+    --radius:14px;
+    --font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Inter,Roboto,sans-serif;
+    --mono:ui-monospace,"SF Mono",JetBrains Mono,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:
+      radial-gradient(900px 500px at 78% -10%, rgba(240,163,94,.10), transparent 60%),
+      radial-gradient(700px 400px at 0% 110%, rgba(110,140,255,.05), transparent 60%),
+      var(--bg);
+    color:var(--text);
+    font-family:var(--font);
+    -webkit-font-smoothing:antialiased;
+    display:grid;place-items:center;
+    padding:28px;
+  }
+  .phone{width:100%;max-width:960px}
+
+  .titlebar{
+    display:flex;align-items:center;gap:10px;
+    margin:0 0 18px;padding:0 4px;
+    color:var(--muted);font-size:12px;letter-spacing:.02em;
+  }
+  .dot{width:10px;height:10px;border-radius:50%}
+  .dot.r{background:#3a3d47}.dot.y{background:#3a3d47}.dot.g{background:#3a3d47}
+  .titlebar .name{color:var(--text);font-weight:600;font-size:12.5px;margin-left:4px}
+  .titlebar .spacer{flex:1}
+  .pill{
+    border:1px solid var(--line);border-radius:999px;padding:4px 10px;
+    display:inline-flex;align-items:center;gap:7px;background:#101219;
+  }
+  .live{width:7px;height:7px;border-radius:50%;background:var(--good);box-shadow:0 0 0 3px rgba(111,208,139,.13)}
+
+  .app{
+    display:grid;grid-template-columns:1.15fr .85fr;gap:16px;
+  }
+  .card{
+    background:linear-gradient(180deg,var(--panel),#11131a);
+    border:1px solid var(--line);border-radius:var(--radius);
+    padding:22px;
+  }
+  .eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:600}
+
+  /* LEFT: timer */
+  .timer-card{display:flex;flex-direction:column;align-items:center;padding-top:26px;position:relative;overflow:hidden}
+  .timer-card::after{
+    content:"";position:absolute;inset:auto -30% -60% -30%;height:220px;
+    background:radial-gradient(closest-side, rgba(240,163,94,.14), transparent);
+    pointer-events:none;
+  }
+  .timer{
+    font-family:var(--mono);font-variant-numeric:tabular-nums;
+    font-size:86px;line-height:1;letter-spacing:-.03em;font-weight:500;
+    margin:20px 0 6px;
+  }
+  .timer .sec{color:var(--muted)}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:22px}
+  .ring{width:100%;height:6px;border-radius:99px;background:#1d2029;overflow:hidden;margin:0 6px 22px}
+  .ring>i{display:block;height:100%;width:42%;border-radius:99px;background:linear-gradient(90deg,#c97b3a,var(--accent))}
+
+  .quick{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;width:100%}
+  .q{
+    border:1px solid var(--line);background:#171a22;color:var(--text);
+    border-radius:10px;padding:10px 2px;font-size:13px;font-weight:600;
+    display:flex;align-items:center;justify-content:center;gap:5px;cursor:pointer;
+    transition:.15s;
+  }
+  .q:hover{border-color:#3a4050;background:#1c202a}
+  .q.neg{color:var(--muted)}
+  .actions{display:grid;grid-template-columns:2fr 1fr;gap:8px;width:100%;margin-top:10px}
+  .btn{
+    border:0;border-radius:11px;padding:13px;font-weight:700;font-size:14px;cursor:pointer;font-family:inherit;
+  }
+  .btn.primary{background:var(--accent);color:#1a1206}
+  .btn.primary:hover{filter:brightness(1.06)}
+  .btn.ghost{background:#171a22;color:var(--muted);border:1px solid var(--line)}
+  .btn.ghost:hover{color:var(--text)}
+
+  /* RIGHT: column */
+  .col{display:flex;flex-direction:column;gap:16px}
+  .rowhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .status{font-size:13px;color:var(--good);font-weight:600;display:flex;align-items:center;gap:7px}
+
+  .toggle{
+    width:44px;height:26px;border-radius:99px;background:var(--accent);position:relative;flex:none;cursor:pointer;
+    transition:.18s;
+  }
+  .toggle i{
+    position:absolute;top:3px;left:21px;width:20px;height:20px;border-radius:50%;background:#1a1206;transition:.18s;
+  }
+  .toggle.off{background:#2a2e39}
+  .toggle.off i{left:3px;background:#767c8c}
+
+  .verse{
+    font-size:13px;color:var(--text);background:#101219;border:1px solid var(--line);
+    border-radius:10px;padding:11px 12px;line-height:1.45;
+  }
+  .verse .k{color:var(--dim);font-size:11px;display:block;margin-bottom:5px;letter-spacing:.06em;text-transform:uppercase;font-weight:600}
+
+  /* meter */
+  .meter{margin-top:14px}
+  .meter .bar{
+    height:44px;border-radius:9px;background:#101219;border:1px solid var(--line);
+    display:flex;align-items:center;padding:0 9px;gap:3px;overflow:hidden;
+  }
+  .meter .bar span{flex:1;background:var(--good);border-radius:2px;opacity:.85;min-width:2px}
+  .meter .bar span.hot{background:var(--warn)}
+  .meter .bar span.peak{background:var(--bad);opacity:1}
+  .meter .bar .ceiling{width:2px;align-self:stretch;background:var(--accent);opacity:.9;border-radius:2px;flex:none}
+  .meter .legend{display:flex;justify-content:space-between;color:var(--dim);font-size:11px;margin-top:8px}
+  .meter .legend b{color:var(--muted);font-weight:500}
+
+  /* schedule */
+  .sched{display:flex;flex-direction:column;gap:2px}
+  .s{
+    display:flex;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid #1c1f27;font-size:13px;
+  }
+  .s:last-child{border-bottom:0}
+  .s .t{font-family:var(--mono);color:var(--muted);font-size:12.5px;width:52px}
+  .s .what{flex:1}
+  .s .tag{font-size:11px;color:var(--dim);border:1px solid var(--line);border-radius:6px;padding:2px 7px}
+  .s .sub2{color:var(--dim);font-size:11.5px}
+
+  .foot{margin-top:18px;display:flex;justify-content:space-between;color:var(--dim);font-size:11.5px;padding:0 4px}
+  .kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 5px;font-family:var(--mono);font-size:10.5px;color:var(--muted);background:#12141b}
+
+  /* compact states row */
+  .states{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:22px}
+  .mini{
+    border:1px solid var(--line);border-radius:12px;background:#101219;padding:14px;
+    display:flex;flex-direction:column;gap:10px;min-height:120px;
+  }
+  .mini .lbl{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);font-weight:600}
+  .mini .big{font-size:15px;font-weight:600}
+  .mini .txt{font-size:12px;color:var(--muted);line-height:1.4}
+
+  .toast{
+    display:flex;align-items:center;gap:10px;background:#1b1710;border:1px solid #4a3a22;
+    border-radius:10px;padding:10px 12px;font-size:12.5px;color:#f3d7b6;
+  }
+  .toast .icn{width:26px;height:26px;border-radius:7px;background:var(--accent);color:#1a1206;display:grid;place-items:center;font-size:13px;font-weight:800;flex:none}
+  .tray{
+    background:#15171e;border:1px solid #2a2f3b;border-radius:10px;padding:9px 11px;
+    display:flex;align-items:center;gap:10px;font-size:12px;color:var(--text);
+  }
+  .tray .mini-ring{
+    width:22px;height:22px;border-radius:50%;flex:none;
+    background:conic-gradient(var(--accent) 0 62%, #2a2f3b 62% 100%);
+    display:grid;place-items:center;font-size:8.5px;font-family:var(--mono);color:#1a1206;font-weight:700;
+  }
+  .tray .mini-ring b{background:#15171e;width:16px;height:16px;border-radius:50%;display:grid;place-items:center;color:var(--text);font-size:7.5px}
+
+  @media (max-width:760px){
+    body{padding:14px;place-items:start center}
+    .app{grid-template-columns:1fr}
+    .timer{font-size:64px}
+    .states{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+<div class="phone">
+
+  <div class="titlebar">
+    <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+    <span class="name">TurnOff</span>
+    <span class="spacer"></span>
+    <span class="pill"><span class="live"></span> Leveling audio</span>
+  </div>
+
+  <div class="app">
+
+    <!-- TIMER -->
+    <section class="card timer-card">
+      <div class="eyebrow">Shutdown in</div>
+      <div class="timer"><span id="mm">29</span>:<span class="sec" id="ss">14</span></div>
+      <div class="sub">Scheduled for 23:32 · voice warning 5 min before</div>
+      <div class="ring"><i id="ring"></i></div>
+
+      <div class="quick">
+        <button class="q neg" onclick="bump(-5)">−5m</button>
+        <button class="q" onclick="bump(5)">+5m</button>
+        <button class="q" onclick="bump(15)">+15m</button>
+        <button class="q" onclick="bump(30)">+30m</button>
+      </div>
+      <div class="actions">
+        <button class="btn primary">Pause countdown</button>
+        <button class="btn ghost">Cancel</button>
+      </div>
+    </section>
+
+    <!-- RIGHT COLUMN -->
+    <div class="col">
+
+      <section class="card">
+        <div class="rowhead">
+          <div>
+            <div class="eyebrow" style="margin-bottom:6px">Night mode</div>
+            <div class="status">● Audio leveler on</div>
+          </div>
+          <div class="toggle" onclick="this.classList.toggle('off')"><i></i></div>
+        </div>
+
+        <div class="verse">
+          <span class="k">Voice warning</span>
+          "Oye, en cinco minutos apago el PC. ¿Paro la serie o lo dejo así?"
+        </div>
+
+        <div class="meter">
+          <div class="bar">
+            <span style="height:30%"></span><span style="height:42%"></span><span style="height:38%"></span>
+            <span style="height:46%"></span><span style="height:40%"></span><span class="hot" style="height:58%"></span>
+            <span class="hot" style="height:72%"></span><span class="peak" style="height:92%"></span>
+            <span class="ceiling"></span>
+            <span style="height:44%"></span><span style="height:36%"></span><span style="height:40%"></span>
+            <span style="height:48%"></span><span style="height:42%"></span><span style="height:38%"></span>
+          </div>
+          <div class="legend">
+            <span>Live RMS <b>−21 dB</b></span>
+            <span>Ceiling <b>−14 dB</b></span>
+            <span>Taming <b>7 peaks</b></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="rowhead">
+          <div class="eyebrow">Tonight</div>
+          <span class="s sub2">Edit schedule</span>
+        </div>
+        <div class="sched">
+          <div class="s"><span class="t">22:55</span><span class="what">Start leveling</span><span class="tag">auto</span></div>
+          <div class="s"><span class="t">23:27</span><span class="what">Voice warning <span class="sub2">(series volume +5%)</span></span><span class="tag">5 min</span></div>
+          <div class="s"><span class="t">23:32</span><span class="what">Shutdown</span><span class="tag">PC</span></div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- STATES -->
+  <div class="states">
+    <div class="mini">
+      <div class="lbl">In-app warning</div>
+      <div class="toast"><span class="icn">5</span><span>Apagado en <b>05:00</b></span></div>
+      <div class="txt">Pulsable para aplazar +10m sin salir del reproductor.</div>
+    </div>
+    <div class="mini">
+      <div class="lbl">Tray</div>
+      <div class="tray"><span class="mini-ring"><b>29</b></span><span>23:32 · leveler on</span></div>
+      <div class="txt">Click → abre panel; right-click → +15m / cancelar.</div>
+    </div>
+    <div class="mini">
+      <div class="lbl">Voice picker</div>
+      <div class="tray" style="gap:8px">
+        <span style="flex:1">Voice: <b>Ana (local)</b></span>
+        <span style="color:var(--muted);font-size:11px">▸ Preview</span>
+      </div>
+      <div class="txt">Sample from VoiceStudio, played at playback volume +5%.</div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span>Mockup only · no real countdown</span>
+    <span><span class="kbd">Space</span> pause · <span class="kbd">+</span>/<span class="kbd">−</span> adjust</span>
+  </div>
+</div>
+
+<script>
+  let left = 29*60 + 14;
+  const total = 35*60;
+  const mm = document.getElementById('mm'), ss = document.getElementById('ss'), ring = document.getElementById('ring');
+  const pad = n => String(n).padStart(2,'0');
+  function render(){
+    mm.textContent = pad(Math.floor(left/60));
+    ss.textContent = pad(left%60);
+    ring.style.width = Math.max(2, Math.min(100,(left/total)*100)) + '%';
+  }
+  function bump(m){ left = Math.max(0, left + m*60); if(left > total) left = total; render(); }
+  render();
+</script>
+</body>
+</html>
