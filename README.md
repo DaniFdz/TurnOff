@@ -38,7 +38,9 @@ testable with `node --test`.
 
 ## Voice warning
 
-Drop the rendered clips in `app/assets/voice/`:
+A real audible warning works out of the box: `app/assets/voice/chime.wav` plays
+when no voice clip exists yet, so the app is never silent. To get the voice,
+drop the rendered clips in `app/assets/voice/`:
 
 - `5m.mp3` — the 5 minute warning
 - `2m.mp3`, `1m.mp3` — optional, for a shorter lead time

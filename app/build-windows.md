@@ -29,5 +29,6 @@ with the proper exe metadata and icon.
 ## Notes
 
 - Nothing here is signed. Windows will show "Unknown publisher" on first run.
-- The voice clips must exist in `app/assets/voice/` **before** building: they are
-  packed into the asar.
+- The clips must exist in `app/assets/voice/` **before** building: they are packed
+  into the asar. `chime.wav` ships with the repo and is the fallback; the
+  VoiceStudio renders (`5m.mp3`, `2m.mp3`, `1m.mp3`) override it automatically.
