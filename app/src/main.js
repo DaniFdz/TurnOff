@@ -3,13 +3,16 @@
 import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, shell } from 'electron';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync, appendFileSync, mkdirSync } from 'node:fs';
+import { existsSync, appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawn, execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
 import { NightSession } from './core/session.js';
 import { createPower } from './core/power.js';
 import { LevelSensor } from './core/audio.js';
 import { Meter, defaultBackend } from './core/meter.js';
 import { Leveler } from './core/dynamics.js';
+import { NightAudio } from './core/night-audio.js';
 import { VoiceWarning } from './core/warning.js';
 import { loadConfig, saveConfig, configPath, DEFAULTS } from './core/config.js';
 import { CHANNELS } from './core/ipc.js';
@@ -134,15 +137,94 @@ ipcMain.on('turnoff:audio:event', (_event, { type, data }) => {
   else if (type === 'error') audioJob.finish(new Error(data?.message ?? 'audio error'));
 });
 
+
+// ---------------------------------------------------------------- night audio
+//
+// The Windows helper is C# compiled on first run with the csc.exe that ships
+// with .NET Framework, so nothing has to be installed and the source stays
+// readable in the repo. One exe per source hash: an update rebuilds it.
+
+let nightAudio = null;
+
+function compileNightAudio(dir) {
+  const source = readFileSync(join(ROOT, 'night-audio', 'NightAudio.cs'));
+  const hash = createHash('sha256').update(source).digest('hex').slice(0, 10);
+  const exe = join(dir, 'night-audio-' + hash + '.exe');
+  if (existsSync(exe)) return Promise.resolve(exe);
+  const cs = join(dir, 'NightAudio.cs');
+  writeFileSync(cs, source);
+  const win = process.env.WINDIR || 'C:\\Windows';
+  const csc = [join(win, 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe'), join(win, 'Microsoft.NET', 'Framework', 'v4.0.30319', 'csc.exe')].find((p) => existsSync(p));
+  if (!csc) return Promise.reject(new Error('csc.exe not found'));
+  return new Promise((resolve, reject) => {
+    execFile(csc, ['/nologo', '/optimize+', '/target:exe', '/out:' + exe, cs], { windowsHide: true, timeout: 60_000 }, (err, stdout) => {
+      if (err || !existsSync(exe)) reject(new Error(String(stdout || err?.message || 'compile failed').slice(0, 400)));
+      else resolve(exe);
+    });
+  });
+}
+
+function startNightAudio() {
+  if (process.platform !== 'win32') return null;
+  const dir = join(app.getPath('userData'), 'night-audio');
+  mkdirSync(dir, { recursive: true });
+  let exePath = null;
+  const na = new NightAudio({
+    spawn: () => spawn(exePath, ['--state', join(dir, 'baseline.state'), '--parent', String(process.pid)], {
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }),
+    log: (m) => bootLog('night-audio: ' + m),
+  });
+  compileNightAudio(dir)
+    .then((exe) => {
+      exePath = exe;
+      bootLog('night-audio: helper ' + exe);
+      na.start();
+    })
+    .catch((err) => {
+      bootLog('night-audio: build failed: ' + err.message);
+      na.fail('compile-failed');
+    });
+  return na;
+}
+
+function levelerOptions() {
+  return { ceilingDb: config.levelingCeiling };
+}
+
+/** State for the renderer: session + live audio, without touching the tray. */
+function pushState() {
+  if (!win || win.isDestroyed() || !session) return;
+  const audio = nightAudio ? nightAudio.snapshot() : { available: false, reason: 'unsupported-platform' };
+  win.webContents.send(CHANNELS.state, {
+    ...session.state,
+    meter: { available: audio.available, reason: audio.reason, peak: audio.peak },
+    peakDb: audio.peakDb,
+    gainDb: audio.gainDb,
+    leveling: config.leveling,
+  });
+}
+
 function buildSession() {
   // Built ONCE. Settings changes update these objects in place: rebuilding the
   // session used to orphan a running countdown the moment a toggle was touched.
   const power = () => createPower({ dryRun: config.dryRun });
   const sensor = new LevelSensor();
-  const meter = new Meter({ read: defaultBackend() });
+  // The meter reads whatever the night-audio helper last measured; it feeds the
+  // voice warning gain even when leveling is off.
+  const meter = new Meter({
+    read: nightAudio
+      ? async () => {
+          const a = nightAudio.snapshot();
+          return a.available ? { ok: true, peak: a.peak } : { ok: false, reason: a.reason };
+        }
+      : defaultBackend(),
+  });
   sensor.attachMeter(meter);
   const leveler = new Leveler({ ceilingDb: config.levelingCeiling });
-  if (config.leveling) meter.start();
+  meter.start();
+  nightAudio?.setEnabled(config.leveling, levelerOptions());
   const warning = new VoiceWarning({
     playFile,
     resolveClip: resolveAsset,
@@ -162,13 +244,15 @@ function buildSession() {
     }),
     warnLeadMs: config.warnLeadMinutes * 60_000,
     onState: (state) => {
-      win?.webContents.send(CHANNELS.state, { ...state, meter: meter.snapshot(), leveling: config.leveling });
+      pushState();
       updateTray(state);
     },
     onEvent: (kind, data) => {
       win?.webContents.send(CHANNELS.event, { kind, data });
       bootLog('event ' + kind + (data ? ' ' + JSON.stringify(data) : ''));
       if (kind === 'warning') showWindow();
+      // Hand the volume back before Windows powers off, or the next boot starts quiet.
+      if (kind === 'shutdown') nightAudio?.setEnabled(false);
     },
   });
   return { session: s, sensor, warning, power, meter, leveler };
@@ -183,11 +267,12 @@ function initSession() {
 
 /** Apply new settings to the live session without touching its countdown. */
 function applyConfig(previous) {
-  const { warning, meter } = session.startRef;
+  const { warning } = session.startRef;
   warning.bump = config.voiceBumpPercent;
   session.timer.warnLeadMs = config.warnLeadMinutes * 60_000;
-  if (config.leveling && !previous.leveling) meter.start();
-  if (!config.leveling && previous.leveling) meter.stop();
+  if (config.leveling !== previous.leveling || config.levelingCeiling !== previous.levelingCeiling) {
+    nightAudio?.setEnabled(config.leveling, levelerOptions());
+  }
   // Dry run toggled while armed: move the OS-side shutdown accordingly.
   if (previous.dryRun !== config.dryRun && session.timer.armed && !session.timer.paused) {
     if (config.dryRun) createPower({ dryRun: false }).abort();
@@ -228,6 +313,8 @@ function createWindow() {
   win.loadFile(join(ROOT, 'renderer', 'index.html'));
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.on('closed', () => (win = null));
+  // Windows is logging off or shutting down: give the volume back now.
+  win.on('session-end', () => nightAudio?.setEnabled(false));
   win.on('close', (event) => {
     if (quitting) return;
     event.preventDefault();
@@ -350,7 +437,10 @@ app.whenReady().then(async () => {
   // the defaults the app is actually running with.
   config = await saveConfig(config);
   bootLog('config loaded');
+  nightAudio = startNightAudio();
   initSession();
+  // ~5 updates a second for the meter; the tray is only rebuilt on session changes.
+  nightAudio?.onLevel(() => pushState());
   registerIpc();
   createWindow();
   bootLog('window created');
@@ -369,7 +459,10 @@ app.on('window-all-closed', () => {
   // Tray app: closing the window is not quitting.
 });
 
-app.on('before-quit', () => { quitting = true; });
+app.on('before-quit', () => {
+  quitting = true;
+  nightAudio?.stop();
+});
 
 app.on('second-instance', (_e, argv) => {
   if (argv.some((a) => a.startsWith('--arm=') || a === '--cancel')) handleArgs(argv);

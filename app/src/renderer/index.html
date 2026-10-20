@@ -65,6 +65,14 @@
 
         <div class="field">
           <div class="fieldhead">
+            <span>Cut loud scenes above</span>
+            <span class="value" id="ceilingValue">−18 dBFS</span>
+          </div>
+          <input type="range" id="ceilingRange" min="-36" max="-6" step="1" value="-18" />
+        </div>
+
+        <div class="field">
+          <div class="fieldhead">
             <span>Voice warning</span>
             <span class="value" id="leadValue">5 min before</span>
           </div>
@@ -83,13 +91,13 @@
           <button class="btn tiny" id="previewBtn">▶ Voice warning</button>
           <button class="btn tiny" id="chimeBtn" title="The fallback sound, used until a voice clip exists">🔔 Chime</button>
         </div>
-        <p class="note" id="audioNote">No voice clip yet — the chime is used.</p>
+        <p class="note" id="audioNote">Spoken warnings at 5, 2 and 1 min; the chime is the fallback.</p>
 
         <div class="meter" aria-hidden="true">
           <div class="bar" id="meter"></div>
           <div class="legend">
             <span>Peak <b id="peakValue">–</b></span>
-            <span>Clip gain <b id="gainValue">–</b></span>
+            <span>Cut <b id="gainValue">–</b></span>
           </div>
           <div class="legend note" id="meterNote">Leveler off</div>
         </div>

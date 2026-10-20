@@ -8,8 +8,8 @@ export const DEFAULTS = {
   defaultMinutes: 30,
   warnLeadMinutes: 5,
   voiceBumpPercent: 5,
-  leveling: false,
-  levelingCeiling: -14,
+  leveling: true,
+  levelingCeiling: -18,
   startMinimized: false,
   dryRun: false,
 };
@@ -25,8 +25,8 @@ export function configPath() {
 
 export async function loadConfig(path = configPath()) {
   try {
-    const raw = await readFile(path, 'utf8');
-    return sanitize({ ...DEFAULTS, ...JSON.parse(raw) });
+    const raw = JSON.parse(await readFile(path, 'utf8'));
+    return sanitize(migrate({ ...DEFAULTS, ...raw }, raw));
   } catch {
     return { ...DEFAULTS };
   }
@@ -37,6 +37,18 @@ export async function saveConfig(config, path = configPath()) {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, JSON.stringify(clean, null, 2), 'utf8');
   return clean;
+}
+
+/**
+ * Settings written before schema 2 carry the old -14 dBFS ceiling as a default,
+ * not as a choice: measured dialogue peaks around -24 dBFS, so -14 let most
+ * loud scenes through. Move untouched values to the new default once.
+ */
+export function migrate(config, raw = config) {
+  if (!raw || raw.schema >= 2) return config;
+  const next = { ...config };
+  if (raw.levelingCeiling === undefined || raw.levelingCeiling === -14) next.levelingCeiling = DEFAULTS.levelingCeiling;
+  return next;
 }
 
 /** Unknown or hostile values must never reach the timer or the shutdown call. */
@@ -54,5 +66,6 @@ export function sanitize(config) {
     levelingCeiling: num(config.levelingCeiling, -60, 0, DEFAULTS.levelingCeiling),
     startMinimized: Boolean(config.startMinimized),
     dryRun: Boolean(config.dryRun),
+    schema: 2,
   };
 }

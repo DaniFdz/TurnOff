@@ -16,6 +16,8 @@ const els = {
   levelStatus: $('levelStatus'),
   leveling: $('levelingToggle'),
   leadRange: $('leadRange'),
+  ceilingRange: $('ceilingRange'),
+  ceilingValue: $('ceilingValue'),
   leadValue: $('leadValue'),
   bumpRange: $('bumpRange'),
   bumpValue: $('bumpValue'),
@@ -136,6 +138,8 @@ function renderConfig() {
   els.dryToggle.style.color = config.dryRun ? 'var(--accent)' : '';
 
   els.leadRange.value = config.warnLeadMinutes;
+  els.ceilingRange.value = config.levelingCeiling;
+  els.ceilingValue.textContent = config.levelingCeiling + ' dBFS';
   els.leadValue.textContent = `${config.warnLeadMinutes} min before`;
   els.bumpRange.value = config.voiceBumpPercent;
   els.bumpValue.textContent = `+${config.voiceBumpPercent}% vs. playback`;
@@ -145,21 +149,23 @@ function renderConfig() {
 const HISTORY = 20;
 const history = new Array(HISTORY).fill(0);
 
+// Bars are drawn in dB (-60..0 dBFS): a linear scale makes dialogue invisible.
+function barLevel(v) {
+  if (typeof v !== 'number' || v <= 0) return 0;
+  return Math.min(1, Math.max(0, (20 * Math.log10(v) + 60) / 60));
+}
+
 function renderMeter() {
   const meter = config.levels;
   const available = Boolean(meter?.available);
+  const ceiling = config.levelingCeiling ?? -18;
   bars.forEach((bar, i) => {
-    const value = history[i] ?? 0;
-    const h = available ? Math.max(4, Math.min(100, value * 100)) : 4;
-    bar.style.height = h + '%';
-    bar.className = available ? (value > 0.85 ? 'peak' : value > 0.6 ? 'hot' : '') : 'off';
+    const v = history[i] ?? 0;
+    const level = barLevel(v);
+    const db = v > 0 ? 20 * Math.log10(v) : -99;
+    bar.style.height = (available ? Math.max(4, level * 100) : 4) + '%';
+    bar.className = !available ? 'off' : config.leveling && db > ceiling ? 'peak' : db > ceiling - 6 ? 'hot' : '';
   });
-  if (!config.leveling) {
-    els.peak.textContent = '–';
-    els.gain.textContent = '–';
-    els.meterNote.textContent = 'Leveler off';
-    return;
-  }
   if (!available) {
     els.peak.textContent = 'n/a';
     els.gain.textContent = '–';
@@ -167,16 +173,28 @@ function renderMeter() {
     return;
   }
   const db = state.peakDb ?? null;
-  els.peak.textContent = db === null ? '–' : `${db.toFixed(1)} dB`;
-  els.gain.textContent = state.gainDb === null || state.gainDb === undefined ? '–' : `${state.gainDb > 0 ? '+' : ''}${state.gainDb.toFixed(1)} dB`;
-  els.meterNote.textContent = 'Live peak · ceiling ' + config.levelingCeiling + ' dB';
+  els.peak.textContent = db === null ? '−∞' : db.toFixed(1) + ' dBFS';
+  if (!config.leveling) {
+    els.gain.textContent = '–';
+    els.meterNote.textContent = 'Leveler off · meter only';
+    return;
+  }
+  const cut = state.gainDb;
+  const cutting = cut !== null && cut !== undefined && cut <= -0.1;
+  els.gain.textContent = cutting ? cut.toFixed(1) + ' dB' : '0 dB';
+  els.meterNote.textContent = cutting
+    ? 'Turning a loud scene down ' + Math.abs(cut).toFixed(0) + ' dB'
+    : 'Listening · cuts anything above ' + ceiling + ' dBFS';
 }
 
 function explainMeter(reason) {
-  if (!reason) return 'No meter';
-  if (reason.includes('addon')) return 'Meter unavailable: Core Audio addon not installed';
-  if (reason.includes('not-implemented')) return 'Meter unavailable on this platform';
-  return `Meter unavailable (${reason})`;
+  if (!reason || reason === 'starting') return 'Starting the audio meter…';
+  if (reason === 'compile-failed') return 'Audio helper could not be built (see boot.log)';
+  if (reason === 'helper-crashed') return 'Audio helper keeps crashing (see boot.log)';
+  if (reason === 'helper-exited') return 'Audio helper restarting…';
+  if (reason === 'no-device') return 'No playback device';
+  if (reason.startsWith('unsupported-platform') || reason.includes('not-implemented')) return 'Leveling needs Windows';
+  return 'Meter unavailable (' + reason + ')';
 }
 
 function pushPeak(peak) {
@@ -229,6 +247,16 @@ els.chime.addEventListener('click', async () => {
 
 els.leveling.addEventListener('change', async () => {
   config = await api.setConfig({ leveling: els.leveling.checked });
+  renderConfig();
+});
+
+els.ceilingRange.addEventListener('input', () => {
+  els.ceilingValue.textContent = els.ceilingRange.value + ' dBFS';
+});
+els.ceilingRange.addEventListener('change', async () => {
+  const levels = config.levels;
+  config = await api.setConfig({ levelingCeiling: Number(els.ceilingRange.value) });
+  config.levels = levels;
   renderConfig();
 });
 

@@ -24,3 +24,10 @@ test('sanitize replaces garbage with defaults', () => {
   assert.equal(config.leveling, true); // any truthy value is fine; it is coerced to a boolean
   assert.equal(sanitize({ leveling: 0 }).leveling, false);
 });
+
+test('the old -14 dBFS default moves to -18 once, a real choice is kept', async () => {
+  const { migrate, sanitize } = await import('../src/core/config.js');
+  assert.equal(sanitize(migrate({ levelingCeiling: -14 }, { levelingCeiling: -14 })).levelingCeiling, -18);
+  assert.equal(sanitize(migrate({ levelingCeiling: -22 }, { levelingCeiling: -22 })).levelingCeiling, -22);
+  assert.equal(sanitize(migrate({ levelingCeiling: -14 }, { levelingCeiling: -14, schema: 2 })).levelingCeiling, -14);
+});
