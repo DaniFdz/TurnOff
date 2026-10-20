@@ -201,3 +201,6 @@ input[type="range"]:disabled { opacity: .45; }
   .timer { font-size: 62px; }
   body { overflow: auto; }
 }
+
+.legend.note { margin-top: 4px; font-size: 10.5px; color: var(--dim); min-height: 14px; }
+.meter .bar span.off { background: #2a2e39; opacity: .6; }

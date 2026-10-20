@@ -50,17 +50,23 @@ system volume change, so it does not leave your volume slider somewhere else.
 
 ## Night mode (audio leveling)
 
-Settings and the UI exist, but the audio path is **not wired yet**: the meter in
-the UI is a placeholder and no DSP is applied to the system output.
+Two halves, both honest about what they can measure:
 
-The plan, in order of least surprises:
+- **The maths is real and tested** (`app/src/core/dynamics.js`): a compressor
+  with fast attack (8 ms) and slow release (350 ms), a ceiling the signal never
+  crosses, and a makeup gain that lifts quiet dialogue but never past that
+  ceiling. 6 tests cover the gunshot case.
+- **The meter is not faked.** `app/src/core/meter.js` reports
+  `available: false` with a reason when there is no backend, and the UI says
+  so instead of drawing decorative bars.
 
-1. **Measure** the default render endpoint with Core Audio
-   (`IAudioMeterInformation::GetPeakValue`). This gives the warning its real
-   gain instead of a fallback.
-2. **Process** the stream with a compressor/limiter (fast attack, slow release,
-   ceiling) through a virtual cable or an APO, and expose only three knobs:
-   ceiling, smoothness, makeup gain.
+Remaining work, in order:
+
+1. **Core Audio peak meter for Windows**: `IAudioMeterInformation::GetPeakValue`
+   on the default render endpoint, as a native addon behind the existing
+   `meter.read()` contract. Until then Windows reports "addon not installed".
+2. **Apply the gain to the stream**: virtual cable or APO, driven by
+   `Leveler.feed()`.
 3. Measure added latency and keep it under ~30 ms, otherwise audio drifts
    against video.
 

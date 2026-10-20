@@ -20,6 +20,21 @@ export class LevelSensor {
     this.floor = floor;
     this.last = null;
     this.source = 'none';
+    this.meter = null;
+  }
+
+  /** Feed live measurements from the Meter; `null` means "no meter". */
+  attachMeter(meter) {
+    this.meter = meter;
+    if (!meter) return;
+    meter.onSample((snap) => {
+      if (snap.available && typeof snap.peak === 'number' && snap.peak > this.floor) {
+        this.last = clamp01(snap.peak);
+        this.source = 'meter';
+      } else if (snap.available === false && this.last !== null) {
+        this.source = 'stale';
+      }
+    });
   }
 
   async sample() {

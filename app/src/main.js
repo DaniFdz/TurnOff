@@ -9,6 +9,8 @@ import { spawn } from 'node:child_process';
 import { NightSession } from './core/session.js';
 import { createPower } from './core/power.js';
 import { LevelSensor } from './core/audio.js';
+import { Meter, defaultBackend } from './core/meter.js';
+import { Leveler } from './core/dynamics.js';
 import { VoiceWarning } from './core/warning.js';
 import { loadConfig, saveConfig, DEFAULTS } from './core/config.js';
 import { CHANNELS } from './core/ipc.js';
@@ -53,6 +55,10 @@ function playFile(path, gain) {
 function buildSession() {
   const power = createPower({ dryRun: config.dryRun });
   const sensor = new LevelSensor();
+  const meter = new Meter({ read: defaultBackend() });
+  sensor.attachMeter(meter);
+  const leveler = new Leveler({ ceilingDb: config.levelingCeiling });
+  if (config.leveling) meter.start();
   const warning = new VoiceWarning({
     playFile,
     resolveClip: resolveAsset,
@@ -66,7 +72,7 @@ function buildSession() {
     warn: () => warning.play(config.warnLeadMinutes).then(() => {}),
     warnLeadMs: config.warnLeadMinutes * 60_000,
     onState: (state) => {
-      win?.webContents.send(CHANNELS.state, state);
+      win?.webContents.send(CHANNELS.state, { ...state, meter: meter.snapshot(), leveling: config.leveling });
       updateTray(state);
     },
     onEvent: (kind, data) => {
@@ -75,7 +81,7 @@ function buildSession() {
       if (kind === 'warning-failed') console.warn('[turnoff] warning failed', data);
     },
   });
-  return { session: s, sensor, warning, power };
+  return { session: s, sensor, warning, power, meter, leveler };
 }
 
 function initSession() {
@@ -168,10 +174,17 @@ function registerIpc() {
   });
   ipcMain.handle(CHANNELS.getConfig, () => config);
   ipcMain.handle(CHANNELS.setConfig, async (_e, patch) => {
+    const previous = config;
     config = await saveConfig({ ...config, ...patch });
-    initSession();
+    const built = initSession();
+    if (config.leveling && !previous.leveling) built.meter.start();
+    if (!config.leveling && previous.leveling) built.meter.stop();
+    // Push the new shape immediately; waiting for the next tick hides the
+    // change until the countdown moves.
+    built.session._emit();
     return config;
   });
+  ipcMain.handle(CHANNELS.meterState, () => session.startRef.meter.snapshot());
   ipcMain.handle('turnoff:open-link', (_e, url) => {
     if (typeof url === 'string' && url.startsWith('https://')) shell.openExternal(url);
   });

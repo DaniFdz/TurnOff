@@ -10,6 +10,7 @@ const CH = {
   resume: 'turnoff:resume',
   cancel: 'turnoff:cancel',
   previewWarning: 'turnoff:preview-warning',
+  meterState: 'turnoff:meter-state',
   getConfig: 'turnoff:get-config',
   setConfig: 'turnoff:set-config',
 };
@@ -27,6 +28,7 @@ contextBridge.exposeInMainWorld('turnoff', {
   resume: () => ipcRenderer.invoke(CH.resume),
   cancel: () => ipcRenderer.invoke(CH.cancel),
   previewWarning: () => ipcRenderer.invoke(CH.previewWarning),
+  getMeterState: () => ipcRenderer.invoke(CH.meterState),
   getConfig: () => ipcRenderer.invoke(CH.getConfig),
   setConfig: (patch) => ipcRenderer.invoke(CH.setConfig, patch),
   openLink: (url) => ipcRenderer.invoke('turnoff:open-link', url),

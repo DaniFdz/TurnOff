@@ -23,6 +23,7 @@ const els = {
   meter: $('meter'),
   peak: $('peakValue'),
   gain: $('gainValue'),
+  meterNote: $('meterNote'),
   agenda: $('agenda'),
   dryToggle: $('dryToggle'),
 };
@@ -31,7 +32,8 @@ const BARS = 20;
 for (let i = 0; i < BARS; i++) els.meter.appendChild(document.createElement('span'));
 const bars = [...els.meter.children];
 
-let config = { defaultMinutes: 30, warnLeadMinutes: 5, voiceBumpPercent: 5, leveling: false, dryRun: false };
+// leveling/levels mirror the backend; nothing here guesses them.
+let config = { defaultMinutes: 30, warnLeadMinutes: 5, voiceBumpPercent: 5, leveling: false, dryRun: false, levelingCeiling: -14, levels: { available: false, reason: 'starting', peak: null } };
 let state = { armed: false, paused: false, remaining: null };
 let totalMs = config.defaultMinutes * 60_000;
 
@@ -55,6 +57,13 @@ function clock(msFromNow) {
 // ── render ──────────────────────────────────────────────────
 function renderState() {
   const { armed, paused, remaining } = state;
+  if (state.meter) config.levels = state.meter;
+  if (config.levels?.available && typeof config.levels.peak === 'number') {
+    pushPeak(config.levels.peak);
+  } else if (config.leveling) {
+    pushPeak(0);
+  }
+  renderMeter();
   els.timer.textContent = armed ? fmt(remaining) : fmt(config.defaultMinutes * 60_000);
   els.timer.classList.toggle('warn', armed && remaining <= config.warnLeadMinutes * 60_000 + 30_000);
   els.timer.classList.toggle('urgent', armed && remaining <= 60_000);
@@ -113,22 +122,48 @@ function renderConfig() {
   els.bumpValue.textContent = `+${config.voiceBumpPercent}% vs. playback`;
 }
 
-// Fake, low-amplitude meter: the UI must look alive without pretending to measure
-// something the core does not measure yet.
-let phase = 0;
-setInterval(() => {
-  phase += 0.35;
+// Meter. When the backend reports no device, the UI says so — no invented bars.
+const HISTORY = 20;
+const history = new Array(HISTORY).fill(0);
+
+function renderMeter() {
+  const meter = config.levels;
+  const available = Boolean(meter?.available);
   bars.forEach((bar, i) => {
-    const base = config.leveling ? 0.35 : 0.06;
-    const wave = Math.sin(phase + i * 0.5) * 0.18 + Math.sin(phase * 0.37 + i) * 0.12;
-    const h = Math.max(6, Math.min(100, (base + wave) * 100));
+    const value = history[i] ?? 0;
+    const h = available ? Math.max(4, Math.min(100, value * 100)) : 4;
     bar.style.height = h + '%';
-    bar.className = h > 78 ? 'peak' : h > 55 ? 'hot' : '';
+    bar.className = available ? (value > 0.85 ? 'peak' : value > 0.6 ? 'hot' : '') : 'off';
   });
-  const peak = config.leveling ? (34 + Math.sin(phase * 0.6) * 6).toFixed(1) : null;
-  els.peak.textContent = peak === null ? '–' : `−${peak} dB`;
-  els.gain.textContent = peak === null ? '–' : `+${(Number(peak) < 40 ? 9 : 6)} dB`;
-}, 320);
+  if (!config.leveling) {
+    els.peak.textContent = '–';
+    els.gain.textContent = '–';
+    els.meterNote.textContent = 'Leveler off';
+    return;
+  }
+  if (!available) {
+    els.peak.textContent = 'n/a';
+    els.gain.textContent = '–';
+    els.meterNote.textContent = explainMeter(meter?.reason);
+    return;
+  }
+  const db = state.peakDb ?? null;
+  els.peak.textContent = db === null ? '–' : `${db.toFixed(1)} dB`;
+  els.gain.textContent = state.gainDb === null || state.gainDb === undefined ? '–' : `${state.gainDb > 0 ? '+' : ''}${state.gainDb.toFixed(1)} dB`;
+  els.meterNote.textContent = 'Live peak · ceiling ' + config.levelingCeiling + ' dB';
+}
+
+function explainMeter(reason) {
+  if (!reason) return 'No meter';
+  if (reason.includes('addon')) return 'Meter unavailable: Core Audio addon not installed';
+  if (reason.includes('not-implemented')) return 'Meter unavailable on this platform';
+  return `Meter unavailable (${reason})`;
+}
+
+function pushPeak(peak) {
+  history.push(typeof peak === 'number' ? Math.min(1, Math.max(0, peak)) : 0);
+  history.shift();
+}
 
 // ── actions ─────────────────────────────────────────────────
 els.main.addEventListener('click', async () => {
