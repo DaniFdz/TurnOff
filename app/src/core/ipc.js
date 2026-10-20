@@ -12,4 +12,7 @@ export const CHANNELS = {
   getConfig: 'turnoff:get-config',
   setConfig: 'turnoff:set-config',
   quit: 'turnoff:quit',
+  minimize: 'turnoff:minimize',
+  hide: 'turnoff:hide',
+  source: 'turnoff:source',
 };

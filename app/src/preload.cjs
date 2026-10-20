@@ -13,6 +13,9 @@ const CH = {
   meterState: 'turnoff:meter-state',
   getConfig: 'turnoff:get-config',
   setConfig: 'turnoff:set-config',
+  minimize: 'turnoff:minimize',
+  hide: 'turnoff:hide',
+  source: 'turnoff:source',
 };
 
 const subscribe = (channel, cb) => {
@@ -29,6 +32,9 @@ contextBridge.exposeInMainWorld('turnoff', {
   cancel: () => ipcRenderer.invoke(CH.cancel),
   previewWarning: () => ipcRenderer.invoke(CH.previewWarning),
   getMeterState: () => ipcRenderer.invoke(CH.meterState),
+  minimize: () => ipcRenderer.invoke(CH.minimize),
+  hide: () => ipcRenderer.invoke(CH.hide),
+  getSource: () => ipcRenderer.invoke(CH.source),
   getConfig: () => ipcRenderer.invoke(CH.getConfig),
   setConfig: (patch) => ipcRenderer.invoke(CH.setConfig, patch),
   openLink: (url) => ipcRenderer.invoke('turnoff:open-link', url),

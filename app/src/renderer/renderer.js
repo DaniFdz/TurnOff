@@ -26,6 +26,10 @@ const els = {
   meterNote: $('meterNote'),
   agenda: $('agenda'),
   dryToggle: $('dryToggle'),
+  minimize: $('minimizeBtn'),
+  hide: $('hideBtn'),
+  quit: $('quitBtn'),
+  footNote: $('footNote'),
 };
 
 const BARS = 20;
@@ -222,6 +226,11 @@ els.dryToggle.addEventListener('click', async () => {
   renderConfig();
 });
 
+// ── window controls ─────────────────────────────────────────
+els.minimize.addEventListener('click', () => api.minimize());
+els.hide.addEventListener('click', () => api.hide());
+els.quit.addEventListener('click', () => api.quit());
+
 let hintTimer = null;
 function flashHint(text, isError = false) {
   els.hint.textContent = text;
@@ -256,4 +265,9 @@ api.onEvent(({ kind, data }) => {
   config = await api.getConfig();
   renderConfig();
   renderState();
+
+  const src = await api.getSource();
+  els.quit.title = `Quit TurnOff ${src.version} completely`;
+  els.quit.textContent = `Quit · v${src.version}`;
+  els.footNote.title = `Settings: ${src.config}\nUser data: ${src.userData}`;
 })();

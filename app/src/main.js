@@ -12,7 +12,7 @@ import { LevelSensor } from './core/audio.js';
 import { Meter, defaultBackend } from './core/meter.js';
 import { Leveler } from './core/dynamics.js';
 import { VoiceWarning } from './core/warning.js';
-import { loadConfig, saveConfig, DEFAULTS } from './core/config.js';
+import { loadConfig, saveConfig, configPath, DEFAULTS } from './core/config.js';
 import { CHANNELS } from './core/ipc.js';
 import { formatRemaining } from './core/timer.js';
 
@@ -124,6 +124,7 @@ function createWindow() {
   });
 
   win.loadFile(join(ROOT, 'renderer', 'index.html'));
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.on('closed', () => (win = null));
   win.on('close', (event) => {
     if (quitting) return;
@@ -131,6 +132,11 @@ function createWindow() {
     win.hide();
   });
   return win;
+}
+
+function windowState() {
+  if (!win || win.isDestroyed()) return { minimized: false, visible: false };
+  return { minimized: win.isMinimized(), visible: win.isVisible() };
 }
 
 function showWindow() {
@@ -154,7 +160,7 @@ function updateTray(state) {
     { label: state?.paused ? 'Resume' : 'Pause', enabled: Boolean(state?.armed), click: () => (state?.paused ? session.resume() : session.pause()) },
     { label: 'Cancel', enabled: Boolean(state?.armed), click: () => session.cancel('tray') },
     { type: 'separator' },
-    { label: 'Quit', click: () => { quitting = true; app.quit(); } },
+    { label: 'Quit TurnOff', click: () => { quitting = true; app.quit(); } },
   ]);
   tray.setContextMenu(menu);
   tray.setTitle?.(state?.armed ? label : '');
@@ -197,6 +203,29 @@ function registerIpc() {
     return config;
   });
   ipcMain.handle(CHANNELS.meterState, () => session.startRef.meter.snapshot());
+  ipcMain.handle(CHANNELS.minimize, () => {
+    if (!win || win.isDestroyed()) return false;
+    // Minimize to the tray, not to the taskbar: this is a tray app.
+    win.minimize();
+    return true;
+  });
+  ipcMain.handle(CHANNELS.hide, () => {
+    if (!win || win.isDestroyed()) return false;
+    win.hide();
+    return true;
+  });
+  ipcMain.handle(CHANNELS.quit, () => {
+    quitting = true;
+    app.quit();
+    return true;
+  });
+  ipcMain.handle(CHANNELS.source, () => ({
+    version: app.getVersion(),
+    platform: process.platform,
+    electron: process.versions.electron,
+    userData: app.getPath('userData'),
+    config: configPath(),
+  }));
   ipcMain.handle('turnoff:open-link', (_e, url) => {
     if (typeof url === 'string' && url.startsWith('https://')) shell.openExternal(url);
   });

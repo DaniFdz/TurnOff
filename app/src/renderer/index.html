@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
@@ -7,8 +7,6 @@
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="drag-strip"></div>
-
   <header class="topbar">
     <div class="brand">
       <span class="mark" aria-hidden="true"></span>
@@ -17,6 +15,14 @@
     <div class="topstatus">
       <span class="chip" id="levelChip" hidden><i class="live"></i> Leveling audio</span>
       <span class="chip quiet" id="dryChip" hidden>Dry run</span>
+    </div>
+    <div class="wincontrols">
+      <button class="wc" id="minimizeBtn" title="Minimize to tray" aria-label="Minimize to tray">
+        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6h8" /></svg>
+      </button>
+      <button class="wc" id="hideBtn" title="Close window (keeps running in the tray)" aria-label="Close window">
+        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" /></svg>
+      </button>
     </div>
   </header>
 
@@ -99,7 +105,7 @@
 
   <footer class="foot">
     <span id="footNote">Space pause · + / − adjust</span>
-    <span id="version">v2.0.0</span>
+    <button class="link danger" id="quitBtn" title="Quit TurnOff completely">Quit</button>
   </footer>
 
   <script src="renderer.js"></script>
