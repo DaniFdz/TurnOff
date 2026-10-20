@@ -56,3 +56,32 @@ test('a second warning cannot start while one is playing', async () => {
   release();
   await first;
 });
+
+test('the chime is used when no voice clip exists yet', async () => {
+  const { warning, played } = make({ clips: { 'chime.wav': '/assets/voice/chime.wav' } });
+  const res = await warning.play(5);
+  assert.equal(res.ok, true);
+  assert.equal(res.kind, 'chime');
+  assert.equal(res.clip, 'chime');
+  assert.equal(played.length, 1);
+});
+
+test('a voice clip always wins over the chime', async () => {
+  const { warning, played } = make({
+    clips: { '5m.mp3': '/assets/voice/5m.mp3', 'chime.wav': '/assets/voice/chime.wav' },
+  });
+  const res = await warning.play(5);
+  assert.equal(res.kind, 'voice');
+  assert.equal(res.clip, '5m');
+  assert.equal(played[0].path, '/assets/voice/5m.mp3');
+});
+
+test('a forced chime does not play a voice clip', async () => {
+  const { warning, played } = make({
+    clips: { '5m.mp3': '/assets/voice/5m.mp3', 'chime.wav': '/assets/voice/chime.wav' },
+  });
+  warning.kind = 'chime';
+  const res = await warning.play(5);
+  assert.equal(res.clip, 'chime');
+  assert.equal(played[0].path, '/assets/voice/chime.wav');
+});

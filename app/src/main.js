@@ -4,7 +4,6 @@ import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, shell } from 'ele
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, appendFileSync, mkdirSync } from 'node:fs';
-import { spawn } from 'node:child_process';
 
 import { NightSession } from './core/session.js';
 import { createPower } from './core/power.js';
@@ -51,18 +50,89 @@ function resolveAsset(name) {
   return candidates.find((p) => existsSync(p)) ?? null;
 }
 
+// ---------------------------------------------------------------- audio
+//
+// The warning is played by an invisible BrowserWindow with an <audio> element.
+// We used to shell out to mpv, which is not installed on a normal Windows box:
+// the warning silently did nothing. This path needs no external player, has a
+// real volume control and a real finish event.
+
+const AUDIO_PRELOAD = join(ROOT, 'audio-preload.cjs');
+const AUDIO_PAGE = join(ROOT, 'audio-window', 'index.html');
+let audioWin = null;
+let audioJob = null;
+
+function getAudioWindow() {
+  if (audioWin && !audioWin.isDestroyed()) return audioWin;
+  audioWin = new BrowserWindow({
+    width: 320,
+    height: 180,
+    show: false,
+    frame: false,
+    skipTaskbar: true,
+    resizable: false,
+    focusable: false,
+    backgroundColor: '#0c0d12',
+    webPreferences: {
+      preload: AUDIO_PRELOAD,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false,
+    },
+  });
+  audioWin.loadFile(AUDIO_PAGE);
+  audioWin.on('closed', () => (audioWin = null));
+  return audioWin;
+}
+
+function resolveClipPath(name) {
+  for (const dir of [join(ASSET_DIR, 'voice'), ASSET_DIR]) {
+    for (const candidate of [name, `${name}.mp3`, `${name}.wav`, `${name}.ogg`]) {
+      const p = join(dir, candidate);
+      if (existsSync(p)) return p;
+    }
+  }
+  return null;
+}
+
 function playFile(path, gain) {
   return new Promise((resolve, reject) => {
-    // `--gain` is applied as element volume, never as a system volume change.
-    const child = spawn(
-      process.env.TURNOFF_PLAYER || 'mpv',
-      ['--no-video', '--really-quiet', '--volume=100', `--af=volume=${(gain * 100).toFixed(1)}dB`, path],
-      { windowsHide: true, stdio: 'ignore' },
-    );
-    child.on('error', reject);
-    child.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`player exit ${code}`))));
+    const filePath = resolveClipPath(path) ?? (existsSync(path) ? path : null);
+    if (!filePath) return reject(new Error(`clip not found: ${path}`));
+
+    const win = getAudioWindow();
+    let settled = false;
+    const finish = (err) => {
+      if (settled) return;
+      settled = true;
+      audioJob = null;
+      clearTimeout(audioJob?.timer);
+      err ? reject(err) : resolve();
+      if (win && !win.isDestroyed()) win.hide();
+    };
+
+    audioJob = { win, finish };
+    // A short clip cannot take long; a stuck overlay must never block shutdown.
+    const timer = setTimeout(() => finish(new Error('playback timeout')), 30_000);
+    audioJob.timer = timer;
+
+    const send = () =>
+      win.webContents.send('turnoff:audio:play', { path: filePath, gain, label: `Warning · ${Math.round(gain * 100)}%` });
+    if (win.webContents.isLoading()) win.webContents.once('did-finish-load', send);
+    else send();
   });
 }
+
+ipcMain.on('turnoff:audio:event', (_event, { type, data }) => {
+  if (!audioJob) return;
+  if (type === 'playing') {
+    bootLog(`warning playing at volume ${data?.volume}`);
+    return;
+  }
+  if (type === 'ended') audioJob.finish();
+  else if (type === 'error') audioJob.finish(new Error(data?.message ?? 'audio error'));
+});
 
 function buildSession() {
   const power = createPower({ dryRun: config.dryRun });
@@ -188,6 +258,18 @@ function registerIpc() {
       return await warning.play(config.warnLeadMinutes);
     } catch (err) {
       return { ok: false, reason: String(err?.message ?? err) };
+    }
+  });
+  ipcMain.handle(CHANNELS.previewChime, async () => {
+    const { warning } = session.startRef;
+    const restore = warning.kind;
+    warning.kind = 'chime';
+    try {
+      return await warning.play(config.warnLeadMinutes);
+    } catch (err) {
+      return { ok: false, reason: String(err?.message ?? err) };
+    } finally {
+      warning.kind = restore;
     }
   });
   ipcMain.handle(CHANNELS.getConfig, () => config);

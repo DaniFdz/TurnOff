@@ -35,9 +35,9 @@
       <div class="ring"><i id="ring"></i></div>
 
       <div class="quick">
+        <button class="q" data-adjust="-1">−1m</button>
         <button class="q" data-adjust="-5">−5m</button>
         <button class="q" data-adjust="5">+5m</button>
-        <button class="q" data-adjust="15">+15m</button>
         <button class="q" data-adjust="30">+30m</button>
       </div>
 
@@ -79,7 +79,11 @@
           <input type="range" id="bumpRange" min="0" max="20" step="1" value="5" />
         </div>
 
-        <button class="btn tiny" id="previewBtn">▶ Preview voice warning</button>
+        <div class="preview-row">
+          <button class="btn tiny" id="previewBtn">▶ Voice warning</button>
+          <button class="btn tiny" id="chimeBtn" title="The fallback sound, used until a voice clip exists">🔔 Chime</button>
+        </div>
+        <p class="note" id="audioNote">No voice clip yet — the chime is used.</p>
 
         <div class="meter" aria-hidden="true">
           <div class="bar" id="meter"></div>

@@ -20,6 +20,8 @@ const els = {
   bumpRange: $('bumpRange'),
   bumpValue: $('bumpValue'),
   preview: $('previewBtn'),
+  chime: $('chimeBtn'),
+  audioNote: $('audioNote'),
   meter: $('meter'),
   peak: $('peakValue'),
   gain: $('gainValue'),
@@ -196,10 +198,20 @@ document.querySelectorAll('.q').forEach((btn) => {
   });
 });
 
+function describePlayback(res) {
+  if (!res?.ok) return `No audio available (${res?.reason ?? 'unknown'}).`;
+  const what = res.kind === 'chime' ? 'Chime' : `Voice clip "${res.clip}"`;
+  return `${what} played at ${(res.gain * 100).toFixed(0)}% volume (peak was ${res.level === null ? 'unknown' : Math.round(res.level * 100) + '%'}).`;
+}
+
 els.preview.addEventListener('click', async () => {
   const res = await api.previewWarning();
-  if (res?.ok) flashHint(`Warning played (${res.clip}, gain ${(res.gain * 100).toFixed(0)}%).`);
-  else flashHint(`No warning audio available (${res?.reason ?? 'unknown'}).`, true);
+  flashHint(describePlayback(res), !res?.ok);
+});
+
+els.chime.addEventListener('click', async () => {
+  const res = await api.previewChime();
+  flashHint(describePlayback(res), !res?.ok);
 });
 
 els.leveling.addEventListener('change', async () => {

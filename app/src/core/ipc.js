@@ -8,6 +8,7 @@ export const CHANNELS = {
   resume: 'turnoff:resume',
   cancel: 'turnoff:cancel',
   previewWarning: 'turnoff:preview-warning',
+  previewChime: 'turnoff:preview-chime',
   meterState: 'turnoff:meter-state',
   getConfig: 'turnoff:get-config',
   setConfig: 'turnoff:set-config',
