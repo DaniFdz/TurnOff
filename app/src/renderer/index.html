@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+<title>TurnOff</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="drag-strip"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <span class="name">TurnOff</span>
+    </div>
+    <div class="topstatus">
+      <span class="chip" id="levelChip" hidden><i class="live"></i> Leveling audio</span>
+      <span class="chip quiet" id="dryChip" hidden>Dry run</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- ── countdown ───────────────────────────────────────────── -->
+    <section class="card timer-card">
+      <div class="eyebrow" id="timerEyebrow">Shutdown in</div>
+      <div class="timer" id="timer">30:00</div>
+      <div class="sub" id="timerSub">Not armed</div>
+      <div class="ring"><i id="ring"></i></div>
+
+      <div class="quick">
+        <button class="q" data-adjust="-5">−5m</button>
+        <button class="q" data-adjust="5">+5m</button>
+        <button class="q" data-adjust="15">+15m</button>
+        <button class="q" data-adjust="30">+30m</button>
+      </div>
+
+      <div class="actions">
+        <button class="btn primary" id="mainAction">Start 30 min</button>
+        <button class="btn ghost" id="cancelBtn" disabled>Cancel</button>
+      </div>
+
+      <p class="hint" id="hint">Nothing is scheduled.</p>
+    </section>
+
+    <!-- ── night mode ──────────────────────────────────────────── -->
+    <div class="col">
+      <section class="card">
+        <div class="rowhead">
+          <div>
+            <div class="eyebrow">Night mode</div>
+            <div class="statusline" id="levelStatus"><i class="dot"></i> Audio leveler off</div>
+          </div>
+          <label class="toggle" title="Audio leveling">
+            <input type="checkbox" id="levelingToggle" />
+            <i></i>
+          </label>
+        </div>
+
+        <div class="field">
+          <div class="fieldhead">
+            <span>Voice warning</span>
+            <span class="value" id="leadValue">5 min before</span>
+          </div>
+          <input type="range" id="leadRange" min="1" max="15" step="1" value="5" />
+        </div>
+
+        <div class="field">
+          <div class="fieldhead">
+            <span>Warning volume</span>
+            <span class="value" id="bumpValue">+5% vs. playback</span>
+          </div>
+          <input type="range" id="bumpRange" min="0" max="20" step="1" value="5" />
+        </div>
+
+        <button class="btn tiny" id="previewBtn">▶ Preview voice warning</button>
+
+        <div class="meter" aria-hidden="true">
+          <div class="bar" id="meter"></div>
+          <div class="legend">
+            <span>Peak <b id="peakValue">–</b></span>
+            <span>Clip gain <b id="gainValue">–</b></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="rowhead">
+          <div class="eyebrow">Tonight</div>
+          <button class="link" id="dryToggle">Dry run: off</button>
+        </div>
+        <div class="agenda" id="agenda">
+          <div class="empty">Arm a countdown to see the schedule.</div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="foot">
+    <span id="footNote">Space pause · + / − adjust</span>
+    <span id="version">v2.0.0</span>
+  </footer>
+
+  <script type="module" src="renderer.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+appId: com.danifdz.turnoff
+productName: TurnOff
+directories:
+  output: release
+files:
+  - src/**/*
+  - dist/**/*
+  - assets/**/*
+  - package.json
+win:
+  target:
+    - nsis
+  icon: assets/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
