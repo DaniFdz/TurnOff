@@ -82,7 +82,8 @@ export class ShutdownTimer {
       this.fired = false;
       this.firedAt = null;
       this.shutdownAt = null;
-      this.deadline = this.now() + this.fireGraceMs;
+      this.deadline = null;
+      this.pausedLeft = this.fireGraceMs; // resume gives back the last minute
       this.onEvent('paused');
       this.onChange(this.remaining());
       return true;

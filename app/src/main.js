@@ -135,7 +135,9 @@ ipcMain.on('turnoff:audio:event', (_event, { type, data }) => {
 });
 
 function buildSession() {
-  const power = createPower({ dryRun: config.dryRun });
+  // Built ONCE. Settings changes update these objects in place: rebuilding the
+  // session used to orphan a running countdown the moment a toggle was touched.
+  const power = () => createPower({ dryRun: config.dryRun });
   const sensor = new LevelSensor();
   const meter = new Meter({ read: defaultBackend() });
   sensor.attachMeter(meter);
@@ -146,12 +148,18 @@ function buildSession() {
     resolveClip: resolveAsset,
     sensor,
     bump: config.voiceBumpPercent,
-    log: (m) => console.warn('[turnoff]', m),
+    log: (m) => bootLog('warning: ' + m),
   });
 
   const s = new NightSession({
-    shutdown: () => power.shutdown(),
-    warn: () => warning.play(config.warnLeadMinutes).then(() => {}),
+    shutdown: () => power().shutdown(),
+    scheduler: {
+      schedule: (seconds) => power().schedule(seconds),
+      abort: () => power().abort(),
+    },
+    warn: () => warning.play(config.warnLeadMinutes).then((res) => {
+      if (res && res.ok === false) throw new Error(res.reason ?? 'no audio');
+    }),
     warnLeadMs: config.warnLeadMinutes * 60_000,
     onState: (state) => {
       win?.webContents.send(CHANNELS.state, { ...state, meter: meter.snapshot(), leveling: config.leveling });
@@ -159,8 +167,8 @@ function buildSession() {
     },
     onEvent: (kind, data) => {
       win?.webContents.send(CHANNELS.event, { kind, data });
+      bootLog('event ' + kind + (data ? ' ' + JSON.stringify(data) : ''));
       if (kind === 'warning') showWindow();
-      if (kind === 'warning-failed') console.warn('[turnoff] warning failed', data);
     },
   });
   return { session: s, sensor, warning, power, meter, leveler };
@@ -171,6 +179,30 @@ function initSession() {
   session = built.session;
   session.startRef = built;
   return built;
+}
+
+/** Apply new settings to the live session without touching its countdown. */
+function applyConfig(previous) {
+  const { warning, meter } = session.startRef;
+  warning.bump = config.voiceBumpPercent;
+  session.timer.warnLeadMs = config.warnLeadMinutes * 60_000;
+  if (config.leveling && !previous.leveling) meter.start();
+  if (!config.leveling && previous.leveling) meter.stop();
+  // Dry run toggled while armed: move the OS-side shutdown accordingly.
+  if (previous.dryRun !== config.dryRun && session.timer.armed && !session.timer.paused) {
+    if (config.dryRun) createPower({ dryRun: false }).abort();
+    else session._sync();
+  }
+  session._emit();
+}
+
+/** Command-line control: TurnOff.exe --arm=30 | --cancel (also via a second instance). */
+function handleArgs(argv) {
+  for (const arg of argv) {
+    const arm = /^--arm=(\d+(?:\.\d+)?)$/.exec(arg);
+    if (arm) { bootLog('cli arm ' + arm[1]); session.start(Number(arm[1])); }
+    if (arg === '--cancel') { bootLog('cli cancel'); session.cancel('cli'); }
+  }
 }
 
 // ---------------------------------------------------------------- window
@@ -276,12 +308,8 @@ function registerIpc() {
   ipcMain.handle(CHANNELS.setConfig, async (_e, patch) => {
     const previous = config;
     config = await saveConfig({ ...config, ...patch });
-    const built = initSession();
-    if (config.leveling && !previous.leveling) built.meter.start();
-    if (!config.leveling && previous.leveling) built.meter.stop();
-    // Push the new shape immediately; waiting for the next tick hides the
-    // change until the countdown moves.
-    built.session._emit();
+    bootLog('config ' + JSON.stringify(patch));
+    applyConfig(previous);
     return config;
   });
   ipcMain.handle(CHANNELS.meterState, () => session.startRef.meter.snapshot());
@@ -333,6 +361,7 @@ app.whenReady().then(async () => {
     bootLog('tray failed: ' + (err?.stack ?? err));
   }
 
+  handleArgs(process.argv);
   if (process.platform === 'linux') app.dock?.hide?.();
 });
 
@@ -342,6 +371,9 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => { quitting = true; });
 
-app.on('second-instance', () => showWindow());
+app.on('second-instance', (_e, argv) => {
+  if (argv.some((a) => a.startsWith('--arm=') || a === '--cancel')) handleArgs(argv);
+  else showWindow();
+});
 
 if (!app.requestSingleInstanceLock()) app.quit();

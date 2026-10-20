@@ -41,7 +41,20 @@ export function createPower({ platform = process.platform, dryRun = false, run =
     return { ok: res.code === 0, error: res.stderr };
   }
 
-  return { shutdown, abort, platform, dryRun };
+  /**
+   * Hand the clock to Windows: schedule the shutdown seconds from now, so it
+   * happens even if this app crashes or is closed. Replaces any pending one.
+   */
+  async function schedule(seconds) {
+    if (platform !== 'win32') return { ok: false, error: 'schedule not applicable' };
+    const secs = Math.max(0, Math.min(315_360_000, Math.round(seconds)));
+    if (dryRun) return { ok: true, dryRun: true, seconds: secs };
+    await run('shutdown', ['/a']); // nothing pending is fine (exit 1116)
+    const res = await run('shutdown', ['/s', '/t', String(secs), '/c', 'TurnOff']);
+    return res.code === 0 ? { ok: true, seconds: secs } : { ok: false, error: res.stderr || 'exit ' + res.code };
+  }
+
+  return { shutdown, abort, schedule, platform, dryRun };
 }
 
 function defaultRun(cmd, args) {
