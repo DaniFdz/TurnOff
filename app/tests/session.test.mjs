@@ -18,6 +18,19 @@ function harness({ shutdownOk = true, warnThrows = false } = {}) {
   return { session, advance, events, shutdowns: () => shutdowns };
 }
 
+test('the shutdown waits the grace minute after zero', async () => {
+  const { session, advance, events } = harness();
+  session.start(1);
+  advance(60_000);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(events.filter((e) => e.kind === 'countdown-ended').length, 1);
+  assert.equal(events.filter((e) => e.kind === 'shutdown').length, 0);
+  advance(61_000);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(events.filter((e) => e.kind === 'shutdown').length, 1);
+  session.dispose();
+});
+
 test('the warning runs before the shutdown, and both happen once', async () => {
   const { session, advance, events } = harness();
   session.start(6);
@@ -26,7 +39,8 @@ test('the warning runs before the shutdown, and both happen once', async () => {
   assert.ok(events.some((e) => e.kind === 'warning-played'));
   assert.equal(events.filter((e) => e.kind === 'shutdown').length, 0);
 
-  advance(300_000);
+  advance(360_000); // 6 min armed: zero at +360s
+  advance(61_000); // the grace minute
   await new Promise((r) => setImmediate(r));
   assert.equal(events.filter((e) => e.kind === 'shutdown').length, 1);
   assert.equal(session.state.armed, false);
@@ -37,7 +51,8 @@ test('a broken voice warning never blocks the shutdown', async () => {
   const { session, advance, events, shutdowns } = harness({ warnThrows: true });
   session.start(6);
   advance(90_000);
-  advance(400_000);
+  advance(360_000); // zero
+  advance(61_000); // grace
   await new Promise((r) => setImmediate(r));
   assert.ok(events.some((e) => e.kind === 'warning-failed'));
   assert.equal(shutdowns(), 1);
@@ -47,7 +62,8 @@ test('a broken voice warning never blocks the shutdown', async () => {
 test('a refused shutdown is reported, not swallowed', async () => {
   const { session, advance, events } = harness({ shutdownOk: false });
   session.start(1);
-  advance(120_000);
+  advance(60_000); // zero
+  advance(61_000); // grace
   await new Promise((r) => setImmediate(r));
   const result = events.find((e) => e.kind === 'shutdown-result');
   assert.equal(result.data.ok, false);

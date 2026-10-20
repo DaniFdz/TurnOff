@@ -86,13 +86,26 @@ function renderState() {
       : `Shutting down at ${clock(remaining)} · voice warning ${config.warnLeadMinutes} min before`;
   }
 
-  els.main.textContent = !armed
-    ? `Start ${config.defaultMinutes} min`
-    : paused
-      ? 'Resume countdown'
-      : 'Pause countdown';
+  const inGrace = state.inGrace === true;
+  els.timer.textContent = armed || inGrace ? fmt(remaining) : fmt(config.defaultMinutes * 60_000);
+  if (inGrace) {
+    els.eyebrow.textContent = 'Shutting down';
+    els.sub.textContent = `Last minute — ${formatGrace(remaining)} to stop it`;
+    els.main.textContent = 'Stop';
+  } else {
+    els.main.textContent = !armed
+      ? `Start ${config.defaultMinutes} min`
+      : paused
+        ? 'Resume countdown'
+        : 'Pause countdown';
+  }
   els.cancel.disabled = !armed;
   renderAgenda();
+}
+
+function formatGrace(ms) {
+  const s = Math.max(0, Math.ceil((ms ?? 0) / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
 function renderAgenda() {

@@ -31,6 +31,7 @@ export class NightSession {
       armed: this.timer.armed,
       paused: this.timer.paused,
       remaining: this.timer.remaining(),
+      inGrace: this.timer.fired === true,
       lastResult: this.lastResult,
     };
   }
@@ -54,8 +55,12 @@ export class NightSession {
     if (kind === 'shutdown') {
       const result = await this.shutdownFn();
       this.lastResult = result;
+      this.lastFiredAt = Date.now();
       this.timer.cancel('fired');
       this.onEvent('shutdown-result', result);
+    }
+    if (kind === 'countdown-ended') {
+      this.onEvent('grace-started', { graceMs: this.timer.fireGraceMs });
     }
     this._emit();
   }

@@ -69,13 +69,44 @@ test('warning fires once when crossing the lead time', () => {
   timer.dispose();
 });
 
-test('shutdown fires exactly once at zero', () => {
+test('the countdown ends at zero but the shutdown waits one more minute', () => {
   const { timer, advance, events } = harness();
   timer.start(1);
+  advance(59_000);
+  assert.equal(events.filter((e) => e.kind === 'countdown-ended').length, 0);
+
+  advance(2_000); // zero, first pass
+  assert.equal(events.filter((e) => e.kind === 'countdown-ended').length, 1);
+  assert.equal(events.filter((e) => e.kind === 'shutdown').length, 0);
+  assert.equal(timer.armed, true, 'still armed during the grace minute');
+
+  advance(30_000); // mid grace
+  assert.equal(events.filter((e) => e.kind === 'shutdown').length, 0);
+
+  advance(31_000); // past the grace
+  assert.equal(events.filter((e) => e.kind === 'shutdown').length, 1);
+  assert.equal(timer.armed, false);
+  timer.dispose();
+});
+
+test('the shutdown fires exactly once, not on every later tick', () => {
+  const { timer, advance, events } = harness();
+  timer.start(1);
+  advance(61_000);
+  advance(61_000);
   advance(60_000);
   advance(60_000);
   assert.equal(events.filter((e) => e.kind === 'shutdown').length, 1);
-  assert.equal(timer.armed, false);
+  timer.dispose();
+});
+
+test('cancelling during the grace minute stops the shutdown', () => {
+  const { timer, advance, events } = harness();
+  timer.start(1);
+  advance(61_000); // inside the grace minute
+  assert.equal(timer.cancel(), true);
+  advance(120_000);
+  assert.equal(events.filter((e) => e.kind === 'shutdown').length, 0);
   timer.dispose();
 });
 
