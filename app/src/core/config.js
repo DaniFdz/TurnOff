@@ -6,7 +6,6 @@ import { homedir } from 'node:os';
 
 export const DEFAULTS = {
   defaultMinutes: 30,
-  warnLeadMinutes: 5,
   voiceBumpPercent: 5,
   leveling: true,
   levelingCeiling: -18,
@@ -60,7 +59,6 @@ export function sanitize(config) {
   };
   return {
     defaultMinutes: num(config.defaultMinutes, 1, 720, DEFAULTS.defaultMinutes),
-    warnLeadMinutes: num(config.warnLeadMinutes, 1, 60, DEFAULTS.warnLeadMinutes),
     voiceBumpPercent: num(config.voiceBumpPercent, 0, 100, DEFAULTS.voiceBumpPercent),
     leveling: Boolean(config.leveling),
     levelingCeiling: num(config.levelingCeiling, -60, 0, DEFAULTS.levelingCeiling),

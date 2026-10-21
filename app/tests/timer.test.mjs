@@ -12,7 +12,7 @@ function harness(opts = {}) {
     ...opts,
   });
   const advance = (ms) => { t += ms; timer._tick(); };
-  return { timer, advance, events, now: () => t };
+  return { timer, advance, events };
 }
 
 test('start arms the countdown with the requested minutes', () => {
@@ -36,8 +36,7 @@ test('adjust moves the deadline forward and back', () => {
 test('adjusting below the warning lead cancels instead of arming a silent window', () => {
   const { timer, events } = harness();
   timer.start(10);
-  const result = timer.adjust(-9.9);
-  assert.equal(result, 'below-lead');
+  assert.equal(timer.adjust(-9.9), 'below-lead');
   assert.equal(timer.armed, false);
   assert.ok(events.some((e) => e.kind === 'disarmed' && e.data.reason === 'adjusted-below-lead'));
   timer.dispose();
@@ -57,56 +56,51 @@ test('pause freezes the remaining time and resume continues it', () => {
   timer.dispose();
 });
 
-test('warning fires once when crossing the lead time', () => {
-  const { timer, advance, events } = harness({ warnLeadMs: 5 * 60_000 });
-  timer.start(6);
-  advance(30_000);
+test('warnings fire at five minutes and again at one, once each', () => {
+  const { timer, advance, events } = harness();
+  timer.start(7);
+  advance(90_000); // 5:30 left
   assert.equal(events.filter((e) => e.kind === 'warning').length, 0);
-  advance(60_000);
+  advance(60_000); // 4:30 left, crossed 5
+  assert.deepEqual(events.filter((e) => e.kind === 'warning').map((e) => e.data.leadMinutes), [5]);
+  advance(60_000); // 3:30
+  advance(60_000); // 2:30
+  advance(60_000); // 1:30
   assert.equal(events.filter((e) => e.kind === 'warning').length, 1);
-  advance(60_000);
-  assert.equal(events.filter((e) => e.kind === 'warning').length, 1);
+  advance(60_000); // 0:30, crossed 1
+  assert.deepEqual(events.filter((e) => e.kind === 'warning').map((e) => e.data.leadMinutes), [5, 1]);
   timer.dispose();
 });
 
-test('the countdown ends at zero but the shutdown waits one more minute', () => {
+test('adjusting does not replay a warning that already happened', () => {
+  const { timer, advance, events } = harness();
+  timer.start(7);
+  advance(150_000); // past the 5 minute mark
+  assert.equal(events.filter((e) => e.kind === 'warning').length, 1);
+  timer.adjust(10);
+  advance(60_000);
+  assert.equal(events.filter((e) => e.kind === 'warning').length, 1, 'no second 5 minute warning');
+  timer.dispose();
+});
+
+test('there is no extra minute: the shutdown fires at zero', () => {
   const { timer, advance, events } = harness();
   timer.start(1);
   advance(59_000);
-  assert.equal(events.filter((e) => e.kind === 'countdown-ended').length, 0);
-
-  advance(2_000); // zero, first pass
-  assert.equal(events.filter((e) => e.kind === 'countdown-ended').length, 1);
   assert.equal(events.filter((e) => e.kind === 'shutdown').length, 0);
-  assert.equal(timer.armed, true, 'still armed during the grace minute');
-
-  advance(30_000); // mid grace
-  assert.equal(events.filter((e) => e.kind === 'shutdown').length, 0);
-
-  advance(31_000); // past the grace
+  advance(2_000);
   assert.equal(events.filter((e) => e.kind === 'shutdown').length, 1);
   assert.equal(timer.armed, false);
   timer.dispose();
 });
 
-test('the shutdown fires exactly once, not on every later tick', () => {
+test('the shutdown fires exactly once', () => {
   const { timer, advance, events } = harness();
   timer.start(1);
   advance(61_000);
   advance(61_000);
-  advance(60_000);
   advance(60_000);
   assert.equal(events.filter((e) => e.kind === 'shutdown').length, 1);
-  timer.dispose();
-});
-
-test('cancelling during the grace minute stops the shutdown', () => {
-  const { timer, advance, events } = harness();
-  timer.start(1);
-  advance(61_000); // inside the grace minute
-  assert.equal(timer.cancel(), true);
-  advance(120_000);
-  assert.equal(events.filter((e) => e.kind === 'shutdown').length, 0);
   timer.dispose();
 });
 
@@ -121,7 +115,7 @@ test('cancel disarms and reports it only when something was armed', () => {
 
 test('formatRemaining pads seconds and switches to hours', () => {
   assert.equal(formatRemaining(0), '00:00');
-  assert.equal(formatRemaining(59_400), '01:00');
+  assert.equal(formatRemaining(1_000), '00:01');
   assert.equal(formatRemaining(3_600_000), '1:00:00');
   assert.equal(formatRemaining(null), '--:--');
 });

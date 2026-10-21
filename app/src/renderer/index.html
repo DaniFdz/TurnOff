@@ -73,14 +73,6 @@
 
         <div class="field">
           <div class="fieldhead">
-            <span>Voice warning</span>
-            <span class="value" id="leadValue">5 min before</span>
-          </div>
-          <input type="range" id="leadRange" min="1" max="15" step="1" value="5" />
-        </div>
-
-        <div class="field">
-          <div class="fieldhead">
             <span>Warning volume</span>
             <span class="value" id="bumpValue">+5% vs. playback</span>
           </div>
@@ -91,7 +83,7 @@
           <button class="btn tiny" id="previewBtn">▶ Voice warning</button>
           <button class="btn tiny" id="chimeBtn" title="The fallback sound, used until a voice clip exists">🔔 Chime</button>
         </div>
-        <p class="note" id="audioNote">Spoken warnings at 5, 2 and 1 min; the chime is the fallback.</p>
+        <p class="note" id="audioNote">Spoken warnings at 5 and 1 min before the shutdown.</p>
 
         <div class="meter" aria-hidden="true">
           <div class="bar" id="meter"></div>

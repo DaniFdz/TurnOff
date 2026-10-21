@@ -3,7 +3,7 @@
 import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, shell } from 'electron';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync, appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, appendFileSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { spawn, execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
@@ -239,10 +239,9 @@ function buildSession() {
       schedule: (seconds) => power().schedule(seconds),
       abort: () => power().abort(),
     },
-    warn: () => warning.play(config.warnLeadMinutes).then((res) => {
+    warn: (lead) => warning.play(lead ?? 5).then((res) => {
       if (res && res.ok === false) throw new Error(res.reason ?? 'no audio');
     }),
-    warnLeadMs: config.warnLeadMinutes * 60_000,
     onState: (state) => {
       pushState();
       updateTray(state);
@@ -269,7 +268,6 @@ function initSession() {
 function applyConfig(previous) {
   const { warning } = session.startRef;
   warning.bump = config.voiceBumpPercent;
-  session.timer.warnLeadMs = config.warnLeadMinutes * 60_000;
   if (config.leveling !== previous.leveling || config.levelingCeiling !== previous.levelingCeiling) {
     nightAudio?.setEnabled(config.leveling, levelerOptions());
   }
@@ -281,13 +279,54 @@ function applyConfig(previous) {
   session._emit();
 }
 
-/** Command-line control: TurnOff.exe --arm=30 | --cancel (also via a second instance). */
-function handleArgs(argv) {
+/**
+ * Command-line control: TurnOff.exe --arm=30 | --cancel | --minimized.
+ *
+ * A second launch cannot talk to the running instance through argv: Electron
+ * drops the arguments when it forwards a second instance, and the second
+ * process still runs its own boot path — which once re-armed a countdown right
+ * after a --cancel. So a second launch leaves an order in a control file and
+ * exits; the instance holding the lock polls it and acts.
+ */
+function parseCli(argv) {
+  const out = { arm: null, cancel: false, minimized: false };
   for (const arg of argv) {
+    if (arg === '--minimized') out.minimized = true;
+    if (arg === '--cancel') out.cancel = true;
     const arm = /^--arm=(\d+(?:\.\d+)?)$/.exec(arg);
-    if (arm) { bootLog('cli arm ' + arm[1]); session.start(Number(arm[1])); }
-    if (arg === '--cancel') { bootLog('cli cancel'); session.cancel('cli'); }
+    if (arm) out.arm = Number(arm[1]);
   }
+  return out;
+}
+
+function controlPath() { return join(app.getPath('userData'), 'control.json'); }
+
+function leaveOrder(order) {
+  try {
+    mkdirSync(dirname(controlPath()), { recursive: true });
+    writeFileSync(controlPath(), JSON.stringify({ ...order, at: Date.now() }));
+  } catch { /* nothing else we can do from the second process */ }
+}
+
+function applyOrder(order) {
+  if (!order) return;
+  if (order.cancel) { bootLog('order cancel'); session.cancel('cli'); }
+  if (typeof order.arm === 'number' && Number.isFinite(order.arm)) { bootLog('order arm ' + order.arm); session.start(order.arm); }
+  if (order.minimized && win && !win.isDestroyed()) { win.hide(); bootLog('order minimized'); }
+}
+
+function watchOrders() {
+  const tick = () => {
+    if (!existsSync(controlPath())) return;
+    let order = null;
+    try {
+      order = JSON.parse(readFileSync(controlPath(), 'utf8'));
+    } catch { /* half-written file: try again next tick */ }
+    try { rmSync(controlPath(), { force: true }); } catch { /* ignore */ }
+    if (order && Date.now() - (order.at ?? 0) < 60_000) applyOrder(order);
+  };
+  const timer = setInterval(tick, 500);
+  timer.unref?.();
 }
 
 // ---------------------------------------------------------------- window
@@ -374,7 +413,7 @@ function registerIpc() {
   ipcMain.handle(CHANNELS.previewWarning, async () => {
     const { warning } = session.startRef;
     try {
-      return await warning.play(config.warnLeadMinutes);
+      return await warning.play(5);
     } catch (err) {
       return { ok: false, reason: String(err?.message ?? err) };
     }
@@ -384,7 +423,7 @@ function registerIpc() {
     const restore = warning.kind;
     warning.kind = 'chime';
     try {
-      return await warning.play(config.warnLeadMinutes);
+      return await warning.play(5);
     } catch (err) {
       return { ok: false, reason: String(err?.message ?? err) };
     } finally {
@@ -451,7 +490,9 @@ app.whenReady().then(async () => {
     bootLog('tray failed: ' + (err?.stack ?? err));
   }
 
-  handleArgs(process.argv);
+  const cli = parseCli(process.argv);
+  if (cli.minimized && win) { win.hide(); bootLog('cli minimized'); }
+  watchOrders();
   if (process.platform === 'linux') app.dock?.hide?.();
 });
 
@@ -464,9 +505,12 @@ app.on('before-quit', () => {
   nightAudio?.stop();
 });
 
-app.on('second-instance', (_e, argv) => {
-  if (argv.some((a) => a.startsWith('--arm=') || a === '--cancel')) handleArgs(argv);
-  else showWindow();
-});
+// A plain re-launch (double click) just brings the window back.
+app.on('second-instance', () => showWindow());
 
-if (!app.requestSingleInstanceLock()) app.quit();
+// Only the lock holder boots the app. A control launch (--arm/--cancel) leaves
+// its order in the control file and exits before doing anything else.
+if (app.requestSingleInstanceLock()) { /* keep running */ } else {
+  leaveOrder(parseCli(process.argv));
+  app.exit(0);
+}

@@ -3,30 +3,27 @@
 
 export const MIN_LEAD_MS = 15_000;
 
-// The v1 app pulled the trigger a minute after the countdown hit zero, and that
-// margin is what kept a slow shutdown from being a surprise. Keep it.
-export const FIRE_GRACE_MS = 60_000;
+// Two spoken warnings, 5 and 1 minutes before the shutdown.
+export const DEFAULT_WARN_LEADS_MS = [5 * 60_000, 60_000];
 
 export class ShutdownTimer {
   /**
    * @param {object} opts
    * @param {() => number} [opts.now]
-   * @param {(ms: number) => '*'} [opts.onChange] called with remaining ms
+   * @param {(ms: number) => void} [opts.onChange] called with remaining ms
    * @param {(kind: string, data?: object) => void} [opts.onEvent]
    * @param {number} [opts.defaultMinutes]
+   * @param {number[]} [opts.warnLeadsMs] warning points before zero, in ms
    */
-  constructor({ now = () => Date.now(), onChange = () => {}, onEvent = () => {}, defaultMinutes = 30, warnLeadMs = 5 * 60_000, fireGraceMs = FIRE_GRACE_MS } = {}) {
+  constructor({ now = () => Date.now(), onChange = () => {}, onEvent = () => {}, defaultMinutes = 30, warnLeadsMs = DEFAULT_WARN_LEADS_MS } = {}) {
     this.now = now;
     this.onChange = onChange;
     this.onEvent = onEvent;
-    this.warnLeadMs = warnLeadMs;
-    this.fireGraceMs = fireGraceMs;
-    this.firedAt = null;
-    this.shutdownAt = null;
+    this.warnLeadsMs = [...warnLeadsMs].sort((a, b) => b - a);
     this.defaultMinutes = defaultMinutes;
     this.deadline = null;
     this.pausedLeft = null;
-    this.warnedAt = null;
+    this.warned = new Set();
     this.fired = false;
     this._tick = this._tick.bind(this);
     this._handle = null;
@@ -34,11 +31,10 @@ export class ShutdownTimer {
 
   get running() { return this.deadline !== null && this.pausedLeft === null; }
   get paused() { return this.pausedLeft !== null; }
-  get armed() { return this.deadline !== null || this.pausedLeft !== null || this.fired; }
+  get armed() { return this.deadline !== null || this.pausedLeft !== null; }
 
   remaining() {
     if (this.pausedLeft !== null) return Math.max(0, this.pausedLeft);
-    if (this.fired && this.shutdownAt !== null) return Math.max(0, this.shutdownAt - this.now());
     if (this.deadline === null) return null;
     return Math.max(0, this.deadline - this.now());
   }
@@ -47,10 +43,8 @@ export class ShutdownTimer {
   start(minutes = this.defaultMinutes) {
     this.deadline = this.now() + Math.max(0, minutes) * 60_000;
     this.pausedLeft = null;
-    this.warnedAt = null;
+    this.warned = new Set();
     this.fired = false;
-    this.firedAt = null;
-    this.shutdownAt = null;
     this._ensureTicking();
     this.onEvent('armed', { remaining: this.remaining() });
     this._tick();
@@ -59,35 +53,21 @@ export class ShutdownTimer {
   /** Accepts any signed minute delta. Never silently goes below the warning lead. */
   adjust(minutes) {
     if (!this.armed) return this.start(Math.max(0, minutes));
-    const left = this.remaining();
-    const next = left + minutes * 60_000;
-    if (this.armed && next < MIN_LEAD_MS) {
+    const next = (this.remaining() ?? 0) + minutes * 60_000;
+    if (next < MIN_LEAD_MS) {
       this.cancel('adjusted-below-lead');
       return 'below-lead';
     }
-    if (this.pausedLeft !== null) {
-      this.pausedLeft = next;
-    } else {
-      this.deadline = this.now() + next;
-    }
-    this.warnedAt = null;
+    if (this.pausedLeft !== null) this.pausedLeft = next;
+    else this.deadline = this.now() + next;
+    // Warnings the new remaining time has already passed stay passed: only the
+    // ones still ahead are re-armed, so adjusting does not replay a warning.
+    this.warned = new Set(this.warnLeadsMs.filter((lead) => next <= lead));
     this.onChange(this.remaining());
     return 'ok';
   }
 
   pause() {
-    // During the grace minute there is no deadline to freeze: just stand down
-    // and let the deadline be pushed back explicitly.
-    if (this.fired) {
-      this.fired = false;
-      this.firedAt = null;
-      this.shutdownAt = null;
-      this.deadline = null;
-      this.pausedLeft = this.fireGraceMs; // resume gives back the last minute
-      this.onEvent('paused');
-      this.onChange(this.remaining());
-      return true;
-    }
     if (!this.running) return false;
     this.pausedLeft = this.remaining();
     this.deadline = null;
@@ -110,10 +90,8 @@ export class ShutdownTimer {
     const wasArmed = this.armed;
     this.deadline = null;
     this.pausedLeft = null;
-    this.warnedAt = null;
+    this.warned = new Set();
     this.fired = false;
-    this.firedAt = null;
-    this.shutdownAt = null;
     this.onChange(null);
     if (wasArmed) this.onEvent('disarmed', { reason });
     return wasArmed;
@@ -133,30 +111,18 @@ export class ShutdownTimer {
     }
     const left = this.remaining();
     this.onChange(left);
-
     if (this.pausedLeft !== null) return;
 
-    if (left <= this.warnLeadMs && this.warnedAt === null) {
-      this.warnedAt = this.warnLeadMs;
-      this.onEvent('warning', { remaining: left });
+    for (const lead of this.warnLeadsMs) {
+      if (left <= lead && !this.warned.has(lead)) {
+        this.warned.add(lead);
+        this.onEvent('warning', { remaining: left, leadMinutes: Math.round(lead / 60_000) });
+      }
     }
-    // At zero the countdown is over, but the shutdown waits one more minute:
-    // same margin the v1 app had, and the last chance to change your mind.
+
+    // Zero is the shutdown: no extra minute, no second countdown.
     if (left <= 0 && !this.fired) {
-      const endedAt = this.now();
       this.fired = true;
-      this.firedAt = endedAt;
-      this.shutdownAt = endedAt + this.fireGraceMs;
-      // Keep it armed: the grace minute is still part of the countdown. The
-      // deadline must NOT be "now", or every later tick thinks zero just
-      // arrived and the grace clock keeps resetting.
-      this.deadline = endedAt + this.fireGraceMs;
-      this.onEvent('countdown-ended', { remaining: 0 });
-    }
-    if (this.fired && this.shutdownAt !== null && this.now() >= this.shutdownAt) {
-      // The shutdown happened: the countdown is over, not paused.
-      this.fired = false;
-      this.firedAt = null;
       this.deadline = null;
       this.pausedLeft = null;
       clearInterval(this._handle);

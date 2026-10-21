@@ -1,27 +1,34 @@
-// src/core/session.js — deep module tying the countdown, the voice warning and the power call.
+// src/core/session.js — deep module tying the countdown, the voice warnings and the power call.
 // The UI and the tray both talk to this and nothing else.
 
-import { ShutdownTimer } from './timer.js';
+import { ShutdownTimer, DEFAULT_WARN_LEADS_MS } from './timer.js';
+
+// Rapid +/- clicks must not reschedule the OS task on every press: one
+// submission after the user stops for a moment.
+const SYNC_DEBOUNCE_MS = 700;
 
 export class NightSession {
   /**
    * @param {object} deps
    * @param {() => Promise<{ok:boolean, error?:string}>} deps.shutdown
-   * @param {() => Promise<void>} deps.warn  plays the voice clip at adjusted volume
+   * @param {(leadMinutes: number) => Promise<void>} deps.warn
    * @param {() => number} [deps.now]
    * @param {(state: object) => void} [deps.onState]
    * @param {(event: string, data?: object) => void} [deps.onEvent]
+   * @param {{schedule:(s:number)=>Promise<any>, abort:()=>Promise<any>}} [deps.scheduler]
    */
-  constructor({ shutdown, warn, now, onState = () => {}, onEvent = () => {}, warnLeadMs = 5 * 60_000, scheduler = null }) {
+  constructor({ shutdown, warn, now, onState = () => {}, onEvent = () => {}, warnLeadsMs = DEFAULT_WARN_LEADS_MS, scheduler = null, syncDebounceMs = SYNC_DEBOUNCE_MS }) {
     this.shutdownFn = shutdown;
-    this.scheduler = scheduler; // { schedule(seconds), abort() } — the OS owns the real deadline
     this.warn = warn;
     this.onState = onState;
     this.onEvent = onEvent;
+    this.scheduler = scheduler;
+    this.syncDebounceMs = syncDebounceMs;
     this.lastResult = null;
+    this.pendingSync = null;
     this.timer = new ShutdownTimer({
       now,
-      warnLeadMs,
+      warnLeadsMs,
       onChange: () => this._emit(),
       onEvent: (kind, data) => this._handleTimerEvent(kind, data),
     });
@@ -32,7 +39,6 @@ export class NightSession {
       armed: this.timer.armed,
       paused: this.timer.paused,
       remaining: this.timer.remaining(),
-      inGrace: this.timer.fired === true,
       lastResult: this.lastResult,
     };
   }
@@ -43,23 +49,31 @@ export class NightSession {
   resume() { const r = this.timer.resume(); this._sync(); return r; }
   cancel(reason) { return this.timer.cancel(reason); }
 
-  /** Seconds until the real shutdown: the countdown plus the grace minute. */
+  /** Seconds until the shutdown the OS should perform, or null. */
   osSecondsLeft() {
     const t = this.timer;
     if (!t.armed || t.paused) return null;
-    const left = t.remaining() ?? 0;
-    return Math.ceil((t.fired ? left : left + t.fireGraceMs) / 1000);
+    return Math.ceil((t.remaining() ?? 0) / 1000);
   }
 
   _sync() {
+    if (!this.scheduler) return;
     const secs = this.osSecondsLeft();
-    if (secs === null || !this.scheduler) return;
-    Promise.resolve(this.scheduler.schedule(secs))
-      .then((res) => this.onEvent('os-scheduled', { seconds: secs, ...res }))
-      .catch((err) => this.onEvent('os-scheduled', { seconds: secs, ok: false, error: String(err?.message ?? err) }));
+    if (this.pendingSync) clearTimeout(this.pendingSync);
+    if (secs === null) { this.pendingSync = null; return; }
+    this.pendingSync = setTimeout(() => {
+      this.pendingSync = null;
+      const at = this.osSecondsLeft();
+      if (at === null) return;
+      Promise.resolve(this.scheduler.schedule(at))
+        .then((res) => this.onEvent('os-scheduled', { seconds: at, ...res }))
+        .catch((err) => this.onEvent('os-scheduled', { seconds: at, ok: false, error: String(err?.message ?? err) }));
+    }, this.syncDebounceMs);
+    this.pendingSync.unref?.();
   }
 
   _abortOs(reason) {
+    if (this.pendingSync) { clearTimeout(this.pendingSync); this.pendingSync = null; }
     if (!this.scheduler) return;
     Promise.resolve(this.scheduler.abort())
       .then((res) => this.onEvent('os-aborted', { reason, ...res }))
@@ -68,30 +82,29 @@ export class NightSession {
 
   async _handleTimerEvent(kind, data) {
     this.onEvent(kind, data);
-    // Any disarm except "it already fired" must take the OS shutdown back.
-    if (kind === 'disarmed' && data?.reason !== 'fired') this._abortOs(data?.reason ?? 'cancel');
+    // Any disarm must take the OS task back.
+    if (kind === 'disarmed') this._abortOs(data?.reason ?? 'cancel');
     if (kind === 'warning') {
+      const lead = data?.leadMinutes ?? 5;
       try {
-        await this.warn();
-        this.onEvent('warning-played');
+        await this.warn(lead);
+        this.onEvent('warning-played', { leadMinutes: lead });
       } catch (err) {
-        this.onEvent('warning-failed', { error: String(err?.message ?? err) });
+        this.onEvent('warning-failed', { leadMinutes: lead, error: String(err?.message ?? err) });
       }
     }
     if (kind === 'shutdown') {
       const result = await this.shutdownFn();
       this.lastResult = result;
-      this.lastFiredAt = Date.now();
-      this.timer.cancel('fired');
       this.onEvent('shutdown-result', result);
-    }
-    if (kind === 'countdown-ended') {
-      this.onEvent('grace-started', { graceMs: this.timer.fireGraceMs });
     }
     this._emit();
   }
 
   _emit() { this.onState(this.state); }
 
-  dispose() { this.timer.dispose(); }
+  dispose() {
+    if (this.pendingSync) clearTimeout(this.pendingSync);
+    this.timer.dispose();
+  }
 }

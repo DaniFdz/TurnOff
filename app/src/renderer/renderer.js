@@ -15,10 +15,8 @@ const els = {
   dryChip: $('dryChip'),
   levelStatus: $('levelStatus'),
   leveling: $('levelingToggle'),
-  leadRange: $('leadRange'),
   ceilingRange: $('ceilingRange'),
   ceilingValue: $('ceilingValue'),
-  leadValue: $('leadValue'),
   bumpRange: $('bumpRange'),
   bumpValue: $('bumpValue'),
   preview: $('previewBtn'),
@@ -41,7 +39,7 @@ for (let i = 0; i < BARS; i++) els.meter.appendChild(document.createElement('spa
 const bars = [...els.meter.children];
 
 // leveling/levels mirror the backend; nothing here guesses them.
-let config = { defaultMinutes: 30, warnLeadMinutes: 5, voiceBumpPercent: 5, leveling: false, dryRun: false, levelingCeiling: -14, levels: { available: false, reason: 'starting', peak: null } };
+let config = { defaultMinutes: 30, voiceBumpPercent: 5, leveling: false, dryRun: false, levelingCeiling: -18, levels: { available: false, reason: 'starting', peak: null } };
 let state = { armed: false, paused: false, remaining: null };
 let totalMs = config.defaultMinutes * 60_000;
 
@@ -73,7 +71,7 @@ function renderState() {
   }
   renderMeter();
   els.timer.textContent = armed ? fmt(remaining) : fmt(config.defaultMinutes * 60_000);
-  els.timer.classList.toggle('warn', armed && remaining <= config.warnLeadMinutes * 60_000 + 30_000);
+  els.timer.classList.toggle('warn', armed && remaining <= 5 * 60_000 + 30_000);
   els.timer.classList.toggle('urgent', armed && remaining <= 60_000);
   els.eyebrow.textContent = paused ? 'Paused' : 'Shutdown in';
 
@@ -85,22 +83,14 @@ function renderState() {
     els.ring.style.width = pct + '%';
     els.sub.textContent = paused
       ? `Paused with ${fmt(remaining)} left`
-      : `Shutting down at ${clock(remaining)} · voice warning ${config.warnLeadMinutes} min before`;
+      : `Shutting down at ${clock(remaining)} · warnings at 5 and 1 min`;
   }
 
-  const inGrace = state.inGrace === true;
-  els.timer.textContent = armed || inGrace ? fmt(remaining) : fmt(config.defaultMinutes * 60_000);
-  if (inGrace) {
-    els.eyebrow.textContent = 'Shutting down';
-    els.sub.textContent = `Last minute — ${formatGrace(remaining)} to stop it`;
-    els.main.textContent = 'Stop';
-  } else {
-    els.main.textContent = !armed
-      ? `Start ${config.defaultMinutes} min`
-      : paused
-        ? 'Resume countdown'
-        : 'Pause countdown';
-  }
+  els.main.textContent = !armed
+    ? `Start ${config.defaultMinutes} min`
+    : paused
+      ? 'Resume countdown'
+      : 'Pause countdown';
   els.cancel.disabled = !armed;
   renderAgenda();
 }
@@ -116,15 +106,15 @@ function renderAgenda() {
     els.agenda.innerHTML = '<div class="empty">Arm a countdown to see the schedule.</div>';
     return;
   }
-  const warnIn = remaining - config.warnLeadMinutes * 60_000;
-  const rows = [
-    { at: paused ? '—' : clock(remaining - warnIn), what: `Voice warning <small>(playback +${config.voiceBumpPercent}%)</small>`, tag: `${config.warnLeadMinutes} min`, next: warnIn > 0 },
-    { at: paused ? '—' : clock(remaining), what: 'Shutdown', tag: 'PC', next: warnIn <= 0 },
-  ];
+  const rows = [5, 1].map((lead) => ({
+    at: paused ? '—' : clock(remaining - lead * 60_000),
+    what: `Voice warning (${lead} min)`,
+    tag: `${lead} min`,
+    next: remaining > lead * 60_000,
+  }));
+  rows.push({ at: paused ? '—' : clock(remaining), what: 'Shutdown', tag: 'PC', next: remaining <= 60_000 });
   els.agenda.innerHTML = rows
-    .map(
-      (r) => `<div class="row${r.next ? ' next' : ''}"><span class="t">${r.at}</span><span class="what">${r.what}</span><span class="tag">${r.tag}</span></div>`,
-    )
+    .map((r) => `<div class="row${r.next ? ' next' : ''}"><span class="t">${r.at}</span><span class="what">${r.what}</span><span class="tag">${r.tag}</span></div>`)
     .join('');
 }
 
@@ -137,10 +127,8 @@ function renderConfig() {
   els.dryToggle.textContent = `Dry run: ${config.dryRun ? 'on' : 'off'}`;
   els.dryToggle.style.color = config.dryRun ? 'var(--accent)' : '';
 
-  els.leadRange.value = config.warnLeadMinutes;
   els.ceilingRange.value = config.levelingCeiling;
   els.ceilingValue.textContent = config.levelingCeiling + ' dBFS';
-  els.leadValue.textContent = `${config.warnLeadMinutes} min before`;
   els.bumpRange.value = config.voiceBumpPercent;
   els.bumpValue.textContent = `+${config.voiceBumpPercent}% vs. playback`;
 }
@@ -213,7 +201,6 @@ els.main.addEventListener('click', async () => {
     await api.pause();
   }
 });
-
 els.cancel.addEventListener('click', () => api.cancel());
 
 document.querySelectorAll('.q').forEach((btn) => {
@@ -225,7 +212,7 @@ document.querySelectorAll('.q').forEach((btn) => {
     }
     const result = await api.adjust(delta);
     totalMs = Math.max(totalMs, (state.remaining ?? 0) + delta * 60_000);
-    if (result === 'below-lead') flashHint(`Too short: cancelled to keep the ${config.warnLeadMinutes} min warning.`, true);
+    if (result === 'below-lead') flashHint('Too short: cancelled instead of arming a countdown with no warning.', true);
   });
 });
 
@@ -260,14 +247,6 @@ els.ceilingRange.addEventListener('change', async () => {
   renderConfig();
 });
 
-els.leadRange.addEventListener('input', () => {
-  els.leadValue.textContent = `${els.leadRange.value} min before`;
-});
-els.leadRange.addEventListener('change', async () => {
-  config = await api.setConfig({ warnLeadMinutes: Number(els.leadRange.value) });
-  renderConfig();
-  renderState();
-});
 els.bumpRange.addEventListener('change', async () => {
   config = await api.setConfig({ voiceBumpPercent: Number(els.bumpRange.value) });
   renderConfig();
@@ -307,7 +286,7 @@ window.addEventListener('keydown', (e) => {
 // ── boot ────────────────────────────────────────────────────
 api.onState((next) => { state = next; renderState(); });
 api.onEvent(({ kind, data }) => {
-  if (kind === 'warning') flashHint('Voice warning played.');
+  if (kind === 'warning') flashHint(`Voice warning played (${data?.leadMinutes ?? '?'} min).`);
   if (kind === 'warning-failed') flashHint(`Voice warning failed: ${data?.error ?? 'unknown'}`, true);
   if (kind === 'shutdown-result') {
     flashHint(data?.ok ? (data.dryRun ? 'Dry run: would shut down now.' : 'Shutdown sent.') : `Shutdown failed: ${data?.error}`, !data?.ok);
