@@ -32,7 +32,9 @@ const registerScript = (task, atIso) => [
   "$ErrorActionPreference='Stop'",
   `$action=New-ScheduledTaskAction -Execute 'shutdown.exe' -Argument '/s /f /t 0'`,
   `$trigger=New-ScheduledTaskTrigger -Once -At ([datetime]'${atIso}')`,
-  `$principal=New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\\$env:USERNAME" -LogonType Interactive`,
+  // SYSTEM runs without a desktop session: as the logged-on user, shutdown.exe
+  // failed with 0xC0000142 whenever the session was locked or the app was closed.
+  `$principal=New-ScheduledTaskPrincipal -UserId 'NT AUTHORITY\\SYSTEM' -LogonType ServiceAccount -RunLevel Highest`,
   `Register-ScheduledTask -TaskName '${task}' -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null`,
   "'ok'",
 ].join('; ');

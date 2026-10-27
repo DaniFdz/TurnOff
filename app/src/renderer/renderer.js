@@ -20,7 +20,6 @@ const els = {
   bumpRange: $('bumpRange'),
   bumpValue: $('bumpValue'),
   preview: $('previewBtn'),
-  chime: $('chimeBtn'),
   audioNote: $('audioNote'),
   meter: $('meter'),
   peak: $('peakValue'),
@@ -217,9 +216,8 @@ document.querySelectorAll('.q').forEach((btn) => {
 });
 
 function describePlayback(res) {
-  if (!res?.ok) return `No audio available (${res?.reason ?? 'unknown'}).`;
-  const what = res.kind === 'chime' ? 'Chime' : `Voice clip "${res.clip}"`;
-  return `${what} played at ${(res.gain * 100).toFixed(0)}% volume (peak was ${res.level === null ? 'unknown' : Math.round(res.level * 100) + '%'}).`;
+  if (!res?.ok) return `Notification failed (${res?.reason ?? res?.error ?? 'unknown'}).`;
+  return 'Notification sent to the Windows tray.';
 }
 
 els.preview.addEventListener('click', async () => {
@@ -227,10 +225,6 @@ els.preview.addEventListener('click', async () => {
   flashHint(describePlayback(res), !res?.ok);
 });
 
-els.chime.addEventListener('click', async () => {
-  const res = await api.previewChime();
-  flashHint(describePlayback(res), !res?.ok);
-});
 
 els.leveling.addEventListener('change', async () => {
   config = await api.setConfig({ leveling: els.leveling.checked });

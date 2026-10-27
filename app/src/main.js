@@ -1,6 +1,6 @@
 // src/main.js — electron main process: window, tray, and the wiring between UI and core.
 
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, shell, screen } from 'electron';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, appendFileSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
@@ -13,7 +13,6 @@ import { LevelSensor } from './core/audio.js';
 import { Meter, defaultBackend } from './core/meter.js';
 import { Leveler } from './core/dynamics.js';
 import { NightAudio } from './core/night-audio.js';
-import { VoiceWarning } from './core/warning.js';
 import { loadConfig, saveConfig, configPath, DEFAULTS } from './core/config.js';
 import { CHANNELS } from './core/ipc.js';
 import { formatRemaining } from './core/timer.js';
@@ -146,22 +145,126 @@ ipcMain.on('turnoff:audio:event', (_event, { type, data }) => {
 
 let nightAudio = null;
 
-function compileNightAudio(dir) {
-  const source = readFileSync(join(ROOT, 'night-audio', 'NightAudio.cs'));
-  const hash = createHash('sha256').update(source).digest('hex').slice(0, 10);
-  const exe = join(dir, 'night-audio-' + hash + '.exe');
-  if (existsSync(exe)) return Promise.resolve(exe);
-  const cs = join(dir, 'NightAudio.cs');
-  writeFileSync(cs, source);
+function cscPath() {
   const win = process.env.WINDIR || 'C:\\Windows';
-  const csc = [join(win, 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe'), join(win, 'Microsoft.NET', 'Framework', 'v4.0.30319', 'csc.exe')].find((p) => existsSync(p));
+  return [join(win, 'Microsoft.NET', 'Framework64', 'v4.0.30319', 'csc.exe'), join(win, 'Microsoft.NET', 'Framework', 'v4.0.30319', 'csc.exe')].find((p) => existsSync(p));
+}
+
+/** Compile one C# helper on first run; the exe name carries the source hash. */
+function compileHelper(dir, sourceRel, prefix, { refs = [], target = 'exe' } = {}) {
+  const source = readFileSync(join(ROOT, sourceRel));
+  const hash = createHash('sha256').update(source).digest('hex').slice(0, 10);
+  const exe = join(dir, prefix + '-' + hash + '.exe');
+  if (existsSync(exe)) return Promise.resolve(exe);
+  const cs = join(dir, prefix + '.cs');
+  writeFileSync(cs, source);
+  const csc = cscPath();
   if (!csc) return Promise.reject(new Error('csc.exe not found'));
+  const args = ['/nologo', '/optimize+', '/target:' + target, '/out:' + exe, ...refs.map((r) => '/r:' + r), cs];
   return new Promise((resolve, reject) => {
-    execFile(csc, ['/nologo', '/optimize+', '/target:exe', '/out:' + exe, cs], { windowsHide: true, timeout: 60_000 }, (err, stdout) => {
+    execFile(csc, args, { windowsHide: true, timeout: 60_000 }, (err, stdout) => {
       if (err || !existsSync(exe)) reject(new Error(String(stdout || err?.message || 'compile failed').slice(0, 400)));
       else resolve(exe);
     });
   });
+}
+
+let toastExe = null;
+let bannerWin = null;
+let bannerTimer = null;
+
+const BANNER_PRELOAD = join(ROOT, 'banner-preload.cjs');
+const BANNER_PAGE = join(ROOT, 'banner', 'index.html');
+
+// An always-on-top card, bottom right. It survives the case that broke the
+// toast: Windows silences notifications while a video plays fullscreen.
+function showBanner(body, { title = 'TurnOff', badge = "5'" } = {}) {
+  if (process.platform !== 'win32') return;
+  try {
+    if (!bannerWin || bannerWin.isDestroyed()) {
+      const { workArea } = screen.getPrimaryDisplay();
+      const width = 460;
+      const height = 132;
+      bannerWin = new BrowserWindow({
+        width,
+        height,
+        x: workArea.x + workArea.width - width - 24,
+        y: workArea.y + workArea.height - height - 24,
+        frame: false,
+        transparent: true,
+        resizable: false,
+        movable: false,
+        minimizable: false,
+        maximizable: false,
+        fullscreenable: false,
+        skipTaskbar: true,
+        focusable: false,
+        show: false,
+        hasShadow: false,
+        alwaysOnTop: true,
+        backgroundColor: '#00000000',
+        webPreferences: {
+          preload: BANNER_PRELOAD,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+        },
+      });
+      bannerWin.setAlwaysOnTop(true, 'screen-saver');
+      bannerWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+      bannerWin.loadFile(BANNER_PAGE);
+      bannerWin.on('closed', () => (bannerWin = null));
+    }
+    const send = () => bannerWin?.webContents.send('turnoff:banner:show', { title, body, badge });
+    if (bannerWin.webContents.isLoading()) bannerWin.webContents.once('did-finish-load', send);
+    else send();
+    bannerWin.showInactive();
+    clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(() => hideBanner(), 25_000);
+    bannerTimer.unref?.();
+    bootLog('banner: ' + body);
+  } catch (err) {
+    bootLog('banner failed: ' + (err?.message ?? err));
+  }
+}
+
+function hideBanner() {
+  clearTimeout(bannerTimer);
+  bannerTimer = null;
+  if (bannerWin && !bannerWin.isDestroyed()) bannerWin.hide();
+}
+
+ipcMain.on('turnoff:banner:dismiss', () => hideBanner());
+
+/**
+ * Windows notification at the warning points. Dani asked for this instead of
+ * the spoken clips: a tray balloon that Windows routes to the Action Center,
+ * with no AppUserModelID to register and no audio device to fight.
+ */
+async function notify(title, body, icon = 'info') {
+  if (process.platform !== 'win32') return { ok: false, error: 'notifications need Windows' };
+  try {
+    if (!toastExe) {
+      const dir = join(app.getPath('userData'), 'tools');
+      mkdirSync(dir, { recursive: true });
+      toastExe = await compileHelper(dir, join('toast', 'Toast.cs'), 'toast', {
+        refs: ['System.Windows.Forms.dll', 'System.Drawing.dll'],
+        target: 'winexe',
+      });
+      bootLog('toast: helper ' + toastExe);
+    }
+    const child = spawn(toastExe, ['--title', title, '--body', body, '--icon', icon, '--seconds', '8'], {
+      windowsHide: true,
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+    bootLog('notification: ' + body);
+    return { ok: true };
+  } catch (err) {
+    bootLog('notification failed: ' + (err?.message ?? err));
+    return { ok: false, error: String(err?.message ?? err) };
+  }
 }
 
 function startNightAudio() {
@@ -176,7 +279,7 @@ function startNightAudio() {
     }),
     log: (m) => bootLog('night-audio: ' + m),
   });
-  compileNightAudio(dir)
+  compileHelper(dir, join('night-audio', 'NightAudio.cs'), 'night-audio')
     .then((exe) => {
       exePath = exe;
       bootLog('night-audio: helper ' + exe);
@@ -225,23 +328,21 @@ function buildSession() {
   const leveler = new Leveler({ ceilingDb: config.levelingCeiling });
   meter.start();
   nightAudio?.setEnabled(config.leveling, levelerOptions());
-  const warning = new VoiceWarning({
-    playFile,
-    resolveClip: resolveAsset,
-    sensor,
-    bump: config.voiceBumpPercent,
-    log: (m) => bootLog('warning: ' + m),
-  });
-
   const s = new NightSession({
     shutdown: () => power().shutdown(),
     scheduler: {
       schedule: (seconds) => power().schedule(seconds),
       abort: () => power().abort(),
     },
-    warn: (lead) => warning.play(lead ?? 5).then((res) => {
-      if (res && res.ok === false) throw new Error(res.reason ?? 'no audio');
-    }),
+    warn: async (lead) => {
+      const mins = lead ?? 5;
+      const body = mins === 1
+        ? 'El ordenador se apaga en 1 minuto.'
+        : `El ordenador se apaga en ${mins} minutos.`;
+      showBanner(body, { badge: mins === 1 ? "1'" : "5'" });
+      const res = await notify('TurnOff', body, 'warn');
+      if (res.ok === false) throw new Error(res.error);
+    },
     onState: (state) => {
       pushState();
       updateTray(state);
@@ -254,7 +355,7 @@ function buildSession() {
       if (kind === 'shutdown') nightAudio?.setEnabled(false);
     },
   });
-  return { session: s, sensor, warning, power, meter, leveler };
+  return { session: s, sensor, power, meter, leveler };
 }
 
 function initSession() {
@@ -266,8 +367,6 @@ function initSession() {
 
 /** Apply new settings to the live session without touching its countdown. */
 function applyConfig(previous) {
-  const { warning } = session.startRef;
-  warning.bump = config.voiceBumpPercent;
   if (config.leveling !== previous.leveling || config.levelingCeiling !== previous.levelingCeiling) {
     nightAudio?.setEnabled(config.leveling, levelerOptions());
   }
@@ -411,24 +510,14 @@ function registerIpc() {
   ipcMain.handle(CHANNELS.resume, () => session.resume());
   ipcMain.handle(CHANNELS.cancel, () => session.cancel('ui'));
   ipcMain.handle(CHANNELS.previewWarning, async () => {
-    const { warning } = session.startRef;
-    try {
-      return await warning.play(5);
-    } catch (err) {
-      return { ok: false, reason: String(err?.message ?? err) };
-    }
+    const body = 'Así se verá el aviso: el ordenador se apaga en 5 minutos.';
+    showBanner(body, { badge: "5'" });
+    const res = await notify('TurnOff', body, 'warn');
+    return res.ok ? { ok: true, kind: 'notification', clip: '5m', gain: 1, level: null } : res;
   });
   ipcMain.handle(CHANNELS.previewChime, async () => {
-    const { warning } = session.startRef;
-    const restore = warning.kind;
-    warning.kind = 'chime';
-    try {
-      return await warning.play(5);
-    } catch (err) {
-      return { ok: false, reason: String(err?.message ?? err) };
-    } finally {
-      warning.kind = restore;
-    }
+    const res = await notify('TurnOff', 'Notificación de prueba.', 'info');
+    return res.ok ? { ok: true, kind: 'notification', clip: 'test', gain: 1, level: null } : res;
   });
   ipcMain.handle(CHANNELS.getConfig, () => config);
   ipcMain.handle(CHANNELS.setConfig, async (_e, patch) => {
@@ -502,6 +591,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   quitting = true;
+  hideBanner();
   nightAudio?.stop();
 });
 
