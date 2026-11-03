@@ -170,59 +170,77 @@ function compileHelper(dir, sourceRel, prefix, { refs = [], target = 'exe' } = {
 }
 
 let toastExe = null;
-let bannerWin = null;
+let banners = new Map(); // display id -> window
 let bannerTimer = null;
 
 const BANNER_PRELOAD = join(ROOT, 'banner-preload.cjs');
 const BANNER_PAGE = join(ROOT, 'banner', 'index.html');
+const BANNER_W = 460;
+const BANNER_H = 132;
 
-// An always-on-top card, bottom right. It survives the case that broke the
-// toast: Windows silences notifications while a video plays fullscreen.
+function createBannerWindow(display) {
+  const { workArea } = display;
+  const win = new BrowserWindow({
+    width: BANNER_W,
+    height: BANNER_H,
+    x: workArea.x + workArea.width - BANNER_W - 24,
+    y: workArea.y + workArea.height - BANNER_H - 24,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    focusable: false,
+    show: false,
+    hasShadow: false,
+    alwaysOnTop: true,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: BANNER_PRELOAD,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.loadFile(BANNER_PAGE);
+  win.on('closed', () => {
+    for (const [id, w] of banners) if (w === win) banners.delete(id);
+  });
+  return win;
+}
+
+// One banner per display: a second monitor (or the TV) is where the series is
+// playing, and a card that only appears on the primary monitor is invisible.
 function showBanner(body, { title = 'TurnOff', badge = "5'" } = {}) {
   if (process.platform !== 'win32') return;
   try {
-    if (!bannerWin || bannerWin.isDestroyed()) {
-      const { workArea } = screen.getPrimaryDisplay();
-      const width = 460;
-      const height = 132;
-      bannerWin = new BrowserWindow({
-        width,
-        height,
-        x: workArea.x + workArea.width - width - 24,
-        y: workArea.y + workArea.height - height - 24,
-        frame: false,
-        transparent: true,
-        resizable: false,
-        movable: false,
-        minimizable: false,
-        maximizable: false,
-        fullscreenable: false,
-        skipTaskbar: true,
-        focusable: false,
-        show: false,
-        hasShadow: false,
-        alwaysOnTop: true,
-        backgroundColor: '#00000000',
-        webPreferences: {
-          preload: BANNER_PRELOAD,
-          contextIsolation: true,
-          nodeIntegration: false,
-          sandbox: true,
-        },
-      });
-      bannerWin.setAlwaysOnTop(true, 'screen-saver');
-      bannerWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-      bannerWin.loadFile(BANNER_PAGE);
-      bannerWin.on('closed', () => (bannerWin = null));
+    const displays = screen.getAllDisplays();
+    for (const [id, win] of [...banners]) {
+      if (!displays.some((d) => d.id === id) || win.isDestroyed()) {
+        try { win.destroy(); } catch { /* already gone */ }
+        banners.delete(id);
+      }
     }
-    const send = () => bannerWin?.webContents.send('turnoff:banner:show', { title, body, badge });
-    if (bannerWin.webContents.isLoading()) bannerWin.webContents.once('did-finish-load', send);
-    else send();
-    bannerWin.showInactive();
+    for (const display of displays) {
+      let win = banners.get(display.id);
+      if (!win || win.isDestroyed()) {
+        win = createBannerWindow(display);
+        banners.set(display.id, win);
+      }
+      const payload = { title, body, badge };
+      const send = () => win.webContents.send('turnoff:banner:show', payload);
+      if (win.webContents.isLoading()) win.webContents.once('did-finish-load', send);
+      else send();
+      win.showInactive();
+    }
     clearTimeout(bannerTimer);
     bannerTimer = setTimeout(() => hideBanner(), 25_000);
     bannerTimer.unref?.();
-    bootLog('banner: ' + body);
+    bootLog(`banner: ${body} (${displays.length} display${displays.length === 1 ? '' : 's'})`);
   } catch (err) {
     bootLog('banner failed: ' + (err?.message ?? err));
   }
@@ -231,7 +249,9 @@ function showBanner(body, { title = 'TurnOff', badge = "5'" } = {}) {
 function hideBanner() {
   clearTimeout(bannerTimer);
   bannerTimer = null;
-  if (bannerWin && !bannerWin.isDestroyed()) bannerWin.hide();
+  for (const win of banners.values()) {
+    try { if (!win.isDestroyed()) win.hide(); } catch { /* already gone */ }
+  }
 }
 
 ipcMain.on('turnoff:banner:dismiss', () => hideBanner());
@@ -388,9 +408,10 @@ function applyConfig(previous) {
  * exits; the instance holding the lock polls it and acts.
  */
 function parseCli(argv) {
-  const out = { arm: null, cancel: false, minimized: false };
+  const out = { arm: null, cancel: false, minimized: false, preview: false };
   for (const arg of argv) {
     if (arg === '--minimized') out.minimized = true;
+    if (arg === '--preview') out.preview = true;
     if (arg === '--cancel') out.cancel = true;
     const arm = /^--arm=(\d+(?:\.\d+)?)$/.exec(arg);
     if (arm) out.arm = Number(arm[1]);
@@ -409,6 +430,12 @@ function leaveOrder(order) {
 
 function applyOrder(order) {
   if (!order) return;
+  if (order.preview) {
+    const body = 'Así se verá el aviso: el ordenador se apaga en 5 minutos.';
+    showBanner(body, { badge: "5'" });
+    notify('TurnOff', body, 'warn');
+    bootLog('order preview');
+  }
   if (order.cancel) { bootLog('order cancel'); session.cancel('cli'); }
   if (typeof order.arm === 'number' && Number.isFinite(order.arm)) { bootLog('order arm ' + order.arm); session.start(order.arm); }
   if (order.minimized && win && !win.isDestroyed()) { win.hide(); bootLog('order minimized'); }
