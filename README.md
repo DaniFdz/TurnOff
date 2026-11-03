@@ -1,59 +1,88 @@
-# Turn off⌚️💻
+# TurnOff v2 — voice warning + night mode
 
-[![version-1.0](https://img.shields.io/badge/version-1.0-green)](https://img.shields.io/badge/version-1.0-green)
-[![GPLv3](https://img.shields.io/badge/license-mit-blue)](https://img.shields.io/badge/license-mit-blue)
-[![Python3](https://img.shields.io/badge/language-Python3-red)](https://img.shields.io/badge/language-Python3-red)
+Redesign of TurnOff: same philosophy (shut the PC down at bedtime), but it now
+warns you by voice before shutting down and can tame the audio of whatever you
+are watching.
 
-Application for scheduling the shutdown of a windows pc
+The v1 app (`src/TurnOff.py`) stays in the tree until v2 ships a signed build.
 
-![example-image](image.png)
+## Download
 
-## Installation ⚙️
-1. Fork/Clone/Download this repo
+Windows builds live under [Releases](https://github.com/DaniFdz/TurnOff/releases).
+There is no Python setup and no virtualenv anymore: the app is a single
+installer.
 
-    `git clone https://github.com/DaniFdz/TurnOff.git`
+## What changed
 
-2. Navigate to the directory
+| | v1 | v2 |
+|---|---|---|
+| UI | Flet (`while True` + `page.update()`) | Electron, frameless window, tray |
+| Timer | fixed 30 min, no warning | configurable, pause/resume, voice warning N min before |
+| Warning sound | fixed mp3 at system volume | voice clip played at playback level **+N%** |
+| Audio | – | night mode: leveling for dialogue vs. gunfights |
+| Shutdown | `shutdown /s /t 1` at T+1 min | `shutdown /s /t 0` at T, dry-run mode for testing |
 
-    `cd TurnOff`
+## Running it
 
-3. Create a virtual environment for this project
-
-    ```bash
-    python -m pip install venv
-    python -m venv venv
-    ```
-
-4. Load the virtual environment: `.\venv\Scripts\activate.ps1`
-  
-5. Run the next commands:
-
- ```ps1
-pip install -r requirements.txt
-cd src
-pyinstaller .\src\TurnOff.py --noconsole --noconfirm --onefile --icon .\src\icon.ico 
+```bash
+cd app
+npm install
+npm run build        # bundles the renderer into dist/
+npm test             # core logic tests, no GUI needed
+npx electron .       # dev run
 ```
 
-## Usage 🌝
-1. Go to the `dist` folder
-2. Execute the main.exe file
+`app/` is plain Node + Electron. The core (`app/src/core/`) has no Electron
+imports on purpose: the timer, the audio-gain math and the power call are all
+testable with `node --test`.
 
-## Updating ⬇️
+## Voice warning
 
-To update the app with the stable release just pull the latest commit using Git.
+A real audible warning works out of the box: `app/assets/voice/chime.wav` plays
+when no voice clip exists yet, so the app is never silent. To get the voice,
+drop the rendered clips in `app/assets/voice/`:
 
-1. Make sure you are in the master branch running: `git checkout master`
-2. Download the latest version: `git pull origin master`
+- `5m.mp3` — the 5 minute warning
+- `2m.mp3`, `1m.mp3` — optional, for a shorter lead time
+- `warn.mp3` — generic fallback if the timed one is missing
 
+Render them once in VoiceStudio and commit them. Playback uses the same gain
+rule as the app: measured playback peak +5% (`app/src/core/audio.js`), never a
+system volume change, so it does not leave your volume slider somewhere else.
 
-## Contributing 💡
+## Night mode (audio leveling)
 
-You can propose a feature request opening an issue or a pull request.
+Two halves, both honest about what they can measure:
 
-Here is a list of TurnOff's contributors:
+- **The maths is real and tested** (`app/src/core/dynamics.js`): a compressor
+  with fast attack (8 ms) and slow release (350 ms), a ceiling the signal never
+  crosses, and a makeup gain that lifts quiet dialogue but never past that
+  ceiling. 6 tests cover the gunshot case.
+- **The meter is not faked.** `app/src/core/meter.js` reports
+  `available: false` with a reason when there is no backend, and the UI says
+  so instead of drawing decorative bars.
 
-<a href="https://github.com/DaniFdz/TurnOff/contributors">
-  <img src="https://contributors-img.web.app/image?repo=DaniFdz/TurnOff" />
-</a>
+Remaining work, in order:
 
-This project uses [MIT licensed](./LICENSE).
+1. **Core Audio peak meter for Windows**: `IAudioMeterInformation::GetPeakValue`
+   on the default render endpoint, as a native addon behind the existing
+   `meter.read()` contract. Until then Windows reports "addon not installed".
+2. **Apply the gain to the stream**: virtual cable or APO, driven by
+   `Leveler.feed()`.
+3. Measure added latency and keep it under ~30 ms, otherwise audio drifts
+   against video.
+
+## Layout
+
+```
+app/
+  src/core/       timer, session, power, audio gain, voice warning, config, ipc
+  src/renderer/   UI (HTML/CSS/JS, no framework)
+  src/main.js     Electron main: window, tray, IPC wiring
+  src/preload.cjs context bridge
+  scripts/        renderer build
+  tests/          node:test suites
+  assets/voice/   voice clips (mp3)
+mockup/           static HTML mockup used to agree on the design first
+src/              v1 Python app
+```

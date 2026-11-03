@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' blob: data:; img-src 'self' data:;" />
+<title>TurnOff audio</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0c0d12; color: #e9ecf2;
+    font: 13px/1.4 system-ui, "Segoe UI", sans-serif; }
+  main { display: grid; place-items: center; gap: 12px; height: 100%; text-align: center; }
+  .ring { width: 54px; height: 54px; border-radius: 50%;
+    background: conic-gradient(#f0a35e var(--p, 0%), #232734 0); display: grid; place-items: center; }
+  .ring b { width: 40px; height: 40px; border-radius: 50%; background: #0c0d12;
+    display: grid; place-items: center; font-size: 11px; font-weight: 600; color: #f0a35e; }
+  p { margin: 0; color: #8b93a3; font-size: 11.5px; }
+</style>
+</head>
+<body>
+  <!-- Dedicated playback surface: Electron's own <audio> gives us real volume
+       control and a finish event, so the warning never shells out to a player
+       that may not exist on the machine. -->
+  <main>
+    <div class="ring" id="ring"><b id="pct">0%</b></div>
+    <p id="caption">Preparing…</p>
+  </main>
+  <audio id="player" preload="auto"></audio>
+  <script src="audio.js"></script>
+</body>
+</html>
